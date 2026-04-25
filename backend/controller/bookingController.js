@@ -53,6 +53,42 @@ const getBookingRoomId = (booking = {}) => booking?.roomId || booking?.room || b
 
 const isCancelledStatus = (value) => String(value || "").toLowerCase() === "cancelled";
 
+const buildRequestedBookingConditions = ({
+  roomId,
+  roomName,
+  branch,
+  roomType,
+}) => {
+  const conditions = [];
+  const trimmedRoomName = String(roomName || "").trim();
+  const trimmedBranch = String(branch || "").trim();
+  const trimmedRoomId = String(roomId || "").trim();
+  const trimmedRoomType = String(roomType || "").trim();
+
+  if (trimmedRoomId) {
+    if (canUseObjectId(trimmedRoomId)) {
+      conditions.push({ room: trimmedRoomId }, { roomId: trimmedRoomId });
+    } else {
+      conditions.push({ roomKey: trimmedRoomId });
+    }
+  }
+
+  if (trimmedRoomName) {
+    const exactRoomName = new RegExp(`^${escapeRegex(trimmedRoomName)}$`, "i");
+    conditions.push({ roomName: exactRoomName });
+  }
+
+  if (trimmedBranch) {
+    conditions.push({ branch: buildBranchMatcher(trimmedBranch) });
+  }
+
+  if (trimmedRoomType) {
+    conditions.push({ roomType: new RegExp(`^${escapeRegex(trimmedRoomType)}$`, "i") });
+  }
+
+  return conditions;
+};
+
 const enrichBookingsWithRoomData = async (bookings = []) => {
   const roomIds = [...new Set(
     bookings
@@ -371,6 +407,12 @@ export const searchAvailability = async (req, res) => {
     }
 
     const stayDateKeys = buildStayDateKeys(checkInDate, checkOutDate);
+    const requestedBookingConditions = buildRequestedBookingConditions({
+      roomId,
+      roomName,
+      branch,
+      roomType,
+    });
 
     console.log("Incoming search body:", {
       branch,
@@ -389,28 +431,40 @@ export const searchAvailability = async (req, res) => {
       (room) => !roomHasManualBlock(room, stayDateKeys)
     );
 
-    if (manuallyAvailableRooms.length === 0) {
-      return res.status(404).json({
-        message: "Selected dates are unavailable for this room.",
-        available: false,
-      });
-    }
-
-    const roomNames = manuallyAvailableRooms.map((room) => room.roomName);
-    const roomIds = manuallyAvailableRooms.map((room) => String(room._id));
-
     const bookingQuery = {
       status: { $nin: ["cancelled", "Cancelled"] },
       checkIn: { $lt: checkOutDate },
       checkOut: { $gt: checkInDate },
-      $or: [
-        { room: { $in: roomIds } },
-        { roomId: { $in: roomIds } },
-        { roomName: { $in: roomNames } },
-      ],
     };
 
-    const overlappingBookings = await Booking.find(bookingQuery);
+    const overlapConditions =
+      manuallyAvailableRooms.length > 0
+        ? [
+            {
+              room: {
+                $in: manuallyAvailableRooms.map((room) => String(room._id)),
+              },
+            },
+            {
+              roomId: {
+                $in: manuallyAvailableRooms.map((room) => String(room._id)),
+              },
+            },
+            {
+              roomName: {
+                $in: manuallyAvailableRooms.map((room) => room.roomName),
+              },
+            },
+          ]
+        : requestedBookingConditions;
+
+    const overlappingBookings = overlapConditions.length
+      ? await Booking.find({
+          ...bookingQuery,
+          $or: overlapConditions,
+        })
+      : [];
+
     const bookedRoomKeys = new Set(
       overlappingBookings.flatMap((booking) => [
         getBookingRoomId(booking) ? String(getBookingRoomId(booking)) : null,
@@ -427,9 +481,23 @@ export const searchAvailability = async (req, res) => {
     console.log("Matching bookings:", overlappingBookings);
 
     if (availableRooms.length === 0) {
-      return res.status(409).json({
-        message:
-          "These dates are reserved for this room type. Please choose different dates.",
+      if (requestedBookingConditions.length > 0) {
+        const directBookingMatches = await Booking.find({
+          ...bookingQuery,
+          $or: requestedBookingConditions,
+        });
+
+        if (directBookingMatches.length > 0) {
+          return res.status(409).json({
+            message:
+              "This room is already reserved for the selected dates. Please choose different dates.",
+            available: false,
+          });
+        }
+      }
+
+      return res.status(404).json({
+        message: "Selected room details were not found in the database.",
         available: false,
       });
     }
