@@ -240,6 +240,9 @@ export const createBooking = async (req, res) => {
     }
 
     const booking = await Booking.create({
+      name,
+      email,
+      phone,
       ...bookingBody,
       room: room?._id || undefined,
       roomKey: roomKey || room?._id?.toString() || "",
