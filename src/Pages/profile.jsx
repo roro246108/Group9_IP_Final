@@ -39,6 +39,19 @@ function ActivityIcon({ type }) {
   return <UserCog className="w-4 h-4" />;
 }
 
+function getProfileInitials(user) {
+  const firstName = `${user?.firstName || ""}`.trim();
+  const lastName = `${user?.lastName || ""}`.trim();
+
+  if (firstName || lastName) {
+    return `${firstName[0] || ""}${lastName[0] || ""}`.toUpperCase();
+  }
+
+  const fullName = `${user?.fullName || ""}`.trim();
+  const parts = fullName.split(/\s+/).filter(Boolean);
+  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "GU";
+}
+
 function ActivityHistoryPanel({ user }) {
   const history = user.activityHistory || [];
   const stats = user.bookingStats || {};
@@ -389,7 +402,7 @@ function ProfileHero({ user }) {
       <div className="relative z-10 p-10 flex flex-col sm:flex-row items-center gap-10">
         <div className="relative">
           <div className="w-32 h-32 rounded-3xl bg-white flex items-center justify-center text-blue-900 text-4xl font-black shadow-2xl border-4 border-blue-700">
-            {user.avatarInitials || "ZH"}
+            {getProfileInitials(user)}
           </div>
           <div className="absolute -bottom-1 -right-1 bg-blue-400 w-6 h-6 rounded-full border-4 border-blue-900 shadow-lg"></div>
         </div>

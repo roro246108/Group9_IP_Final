@@ -87,19 +87,34 @@ export async function getMyBookings() {
 export async function cancelMyBooking(bookingId) {
   const token = getToken();
 
-  const res = await fetch(`${API_BASE}/bookings/${bookingId}/cancel`, {
+  const requestOptions = {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
-  });
+  };
 
-  const data = await res.json();
+  const cancelResponse = await fetch(`${API_BASE}/bookings/${bookingId}/cancel`, requestOptions);
+  const cancelData = await cancelResponse.json();
 
-  if (!res.ok) {
-    throw new Error(data.message || "Failed to cancel booking");
+  if (cancelResponse.ok) {
+    return cancelData;
   }
 
-  return data;
+  const fallbackResponse = await fetch(`${API_BASE}/bookings/${bookingId}`, {
+    ...requestOptions,
+    body: JSON.stringify({
+      status: "Cancelled",
+      cancelledAt: new Date().toISOString(),
+    }),
+  });
+
+  const fallbackData = await fallbackResponse.json();
+
+  if (!fallbackResponse.ok) {
+    throw new Error(cancelData.message || fallbackData.message || "Failed to cancel booking");
+  }
+
+  return fallbackData;
 }

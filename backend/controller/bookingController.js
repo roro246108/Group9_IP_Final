@@ -49,7 +49,9 @@ const roomHasManualBlock = (room, dateKeys) =>
 const canUseObjectId = (value) =>
   !!value && mongoose.Types.ObjectId.isValid(String(value));
 
-const getBookingRoomId = (booking = {}) => booking?.roomId || booking?.room || null;
+const getBookingRoomId = (booking = {}) => booking?.roomId || booking?.room || booking?.roomKey || null;
+
+const isCancelledStatus = (value) => String(value || "").toLowerCase() === "cancelled";
 
 const enrichBookingsWithRoomData = async (bookings = []) => {
   const roomIds = [...new Set(
@@ -89,7 +91,7 @@ async function updateProfileBookingStats(userId) {
   const snapshots = bookings.map((booking) => {
     const checkOut = booking?.checkOut ? new Date(booking.checkOut) : null;
     const status =
-      booking?.status === "cancelled"
+      isCancelledStatus(booking?.status)
         ? "cancelled"
         : checkOut && !Number.isNaN(checkOut.getTime()) && checkOut < today
           ? "completed"
@@ -179,8 +181,31 @@ async function updateProfileBookingStats(userId) {
 // CREATE
 export const createBooking = async (req, res) => {
   try {
-    const { name, email, phone, roomId, room: roomField } = req.body;
+    const {
+      roomId,
+      room: roomField,
+      name,
+      email,
+      phone,
+      roomKey: incomingRoomKey,
+      ...bookingBody
+    } = req.body;
     const resolvedRoomId = roomId || roomField;
+    let roomKey = String(incomingRoomKey || resolvedRoomId || "").trim();
+
+    console.log("createBooking payload:", {
+      userId: req.user?.userId,
+      roomId,
+      roomField,
+      resolvedRoomId,
+      name,
+      email,
+      phone,
+      checkIn: req.body?.checkIn,
+      checkOut: req.body?.checkOut,
+      nights: req.body?.nights,
+      total: req.body?.total,
+    });
 
     if (!name || !email || !phone) {
       return res.status(400).json({ message: "Missing required fields" });
@@ -189,37 +214,60 @@ export const createBooking = async (req, res) => {
     let room = null;
 
     if (resolvedRoomId) {
-      if (!mongoose.Types.ObjectId.isValid(resolvedRoomId)) {
-        return res.status(400).json({ message: "Invalid room id" });
+      if (mongoose.Types.ObjectId.isValid(resolvedRoomId)) {
+        room = await Room.findById(resolvedRoomId);
+      } else {
+        const roomLookup = {};
+        if (bookingBody.roomName) {
+          roomLookup.roomName = new RegExp(
+            `^${escapeRegex(String(bookingBody.roomName).trim())}$`,
+            "i"
+          );
+        }
+        if (bookingBody.branch) {
+          roomLookup.branch = new RegExp(
+            `^${escapeRegex(String(bookingBody.branch).trim())}$`,
+            "i"
+          );
+        }
+
+        room = Object.keys(roomLookup).length > 0 ? await Room.findOne(roomLookup) : null;
       }
 
-      room = await Room.findById(resolvedRoomId);
-
-      if (!room) {
-        return res.status(404).json({ message: "Room not found" });
+      if (room && !roomKey) {
+        roomKey = String(room._id);
       }
     }
 
     const booking = await Booking.create({
-      ...req.body,
-      room: resolvedRoomId || undefined,
-      roomId: resolvedRoomId || undefined,
+      ...bookingBody,
+      room: room?._id || undefined,
+      roomKey: roomKey || room?._id?.toString() || "",
       confirmationCode: req.body.confirmationCode || buildConfirmationCode(),
-      image: req.body.image || room?.image || "",
-      hotelName: req.body.hotelName || room?.hotelName || "Blue Wave Hotel",
-      branch: req.body.branch || room?.branch || "",
-      city: req.body.city || room?.city || "",
-      location: req.body.location || room?.location || "",
-      roomName: req.body.roomName || room?.roomName || "",
-      roomType: req.body.roomType || room?.type || "",
-      beds: req.body.beds || room?.beds || 1,
-      baths: req.body.baths || room?.baths || 1,
-      size: req.body.size || room?.size || 1,
-      description: req.body.description || room?.description || "",
-      amenities: req.body.amenities || room?.amenities || [],
-      guests: req.body.guests || room?.guests || 1,
-      price: req.body.price ?? room?.price ?? 0,
+      image: bookingBody.image || room?.image || "",
+      hotelName: bookingBody.hotelName || room?.hotelName || "Blue Wave Hotel",
+      branch: bookingBody.branch || room?.branch || "",
+      city: bookingBody.city || room?.city || "",
+      location: bookingBody.location || room?.location || "",
+      roomName: bookingBody.roomName || room?.roomName || "",
+      roomType: bookingBody.roomType || room?.type || "",
+      beds: bookingBody.beds || room?.beds || 1,
+      baths: bookingBody.baths || room?.baths || 1,
+      size: bookingBody.size || room?.size || 1,
+      description: bookingBody.description || room?.description || "",
+      amenities: bookingBody.amenities || room?.amenities || [],
+      guests: bookingBody.guests || room?.guests || 1,
+      price: bookingBody.price ?? room?.price ?? 0,
       userId: req.user?.userId,
+    });
+
+    console.log("createBooking saved:", {
+      bookingId: String(booking._id),
+      userId: String(booking.userId || ""),
+      roomId: String(booking.roomId || booking.room || ""),
+      branch: booking.branch,
+      roomName: booking.roomName,
+      total: booking.total,
     });
 
     if (req.user?.userId) {
@@ -240,6 +288,7 @@ export const createBooking = async (req, res) => {
             roomType: booking.roomType || "",
             checkIn: booking.checkIn,
             checkOut: booking.checkOut,
+            nights: booking.nights || 1,
             total: booking.total ?? booking.price ?? 0,
           },
         }),
@@ -248,6 +297,7 @@ export const createBooking = async (req, res) => {
 
     res.status(201).json(booking);
   } catch (error) {
+    console.error("createBooking failed:", error?.name, error?.message, error?.errors || "");
     res.status(500).json({ message: error.message });
   }
 };
@@ -302,13 +352,7 @@ export const searchAvailability = async (req, res) => {
       guests: { $gte: guestNumber },
     };
 
-    if (roomId) {
-      if (!mongoose.Types.ObjectId.isValid(roomId)) {
-        return res.status(400).json({
-          message: "Invalid room id",
-        });
-      }
-
+    if (roomId && mongoose.Types.ObjectId.isValid(roomId)) {
       roomQuery._id = roomId;
     } else if (roomName && roomName.trim() !== "") {
       roomQuery.roomName = new RegExp(`^${escapeRegex(roomName.trim())}$`, "i");
@@ -491,7 +535,7 @@ export const cancelMyBooking = async (req, res) => {
         _id: req.params.id,
         userId: req.user.userId,
       },
-      { status: "cancelled", cancelledAt: new Date() },
+      { status: "Cancelled", cancelledAt: new Date() },
       { new: true, runValidators: true }
     );
 

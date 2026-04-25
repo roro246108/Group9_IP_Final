@@ -9,8 +9,10 @@ const bookingSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Room",
       alias: "roomId",
-      required: true,
+      required: false,
     },
+
+    roomKey: { type: String, trim: true, default: "" },
 
     // home page search availability
     branch: { type: String, trim: true },

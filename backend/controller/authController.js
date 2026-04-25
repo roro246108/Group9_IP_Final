@@ -3,8 +3,12 @@
 
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import process from "node:process";
+import { nanoid } from "nanoid";
 import { validationResult } from "express-validator";
 import User from "../models/User.js";
+import ProfileInfo from "../models/ProfileInfo.js";
+import { appendProfileActivity } from "./profileController.js";
 
 const generateToken = (user) => {
   return jwt.sign(
@@ -23,6 +27,28 @@ const buildUserResponse = (user) => ({
   phone: user.phone,
   role: user.role,
   status: user.status,
+});
+
+const buildAdminUserResponse = (user, profileInfo = null) => ({
+  id: user._id,
+  firstName: user.firstName,
+  lastName: user.lastName,
+  fullName: `${user.firstName} ${user.lastName}`.trim(),
+  email: user.email,
+  phone: user.phone,
+  role: user.role,
+  status: user.status,
+  createdAt: user.createdAt,
+  lastLoginAt: user.lastLoginAt || null,
+  address: profileInfo?.address || user.address || "",
+  city: profileInfo?.city || user.city || "",
+  country: profileInfo?.country || user.country || "",
+  avatar:
+    profileInfo?.avatar ||
+    `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(
+      `${user.firstName || ""}${user.lastName || ""}`.trim() || user.email || String(user._id)
+    )}`,
+  activityHistory: profileInfo?.activityHistory || [],
 });
 
 export const register = async (req, res) => {
@@ -129,6 +155,18 @@ export const login = async (req, res) => {
       user.lastLoginAt = new Date();
       await user.save();
 
+      await appendProfileActivity(user._id, {
+        type: "login",
+        title: "User logged in",
+        description: "User logged into the system.",
+        metadata: {
+          loginAt: new Date().toISOString(),
+          ipAddress: req.ip || "",
+        },
+      }).catch((error) => {
+        console.warn("Failed to append login activity:", error.message);
+      });
+
       const token = generateToken(user);
 
       return res.status(200).json({
@@ -193,11 +231,140 @@ export const logout = async (req, res) => {
 
 export const getAllUsers = async (req, res) => {
   try {
-    const users = await User.find().select("-password");
+    const users = await User.find().select("-password").sort({ createdAt: -1 });
+    const profiles = await ProfileInfo.find({
+      userId: { $in: users.map((user) => user._id) },
+    }).lean();
+    const profileMap = new Map(profiles.map((profile) => [String(profile.userId), profile]));
 
     res.status(200).json({
       count: users.length,
-      users: users.map(buildUserResponse),
+      users: users.map((user) => buildAdminUserResponse(user, profileMap.get(String(user._id)))),
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+export const updateUserStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const previousStatus = user.status;
+    const nextStatus =
+      status && ["active", "blocked"].includes(String(status).toLowerCase())
+        ? String(status).toLowerCase()
+        : previousStatus === "active"
+          ? "blocked"
+          : "active";
+
+    user.status = nextStatus;
+    await user.save();
+
+    const profile = await appendProfileActivity(user._id, {
+      type: "status_changed",
+      title: nextStatus === "blocked" ? "User blocked" : "User unblocked",
+      description: `Account status changed to ${nextStatus}.`,
+      metadata: {
+        previousStatus,
+        nextStatus,
+        changedBy: req.user?.userId || null,
+      },
+    });
+
+    const profileInfo = profile
+      ? profile.toObject
+        ? profile.toObject()
+        : profile
+      : await ProfileInfo.findOne({ userId: user._id }).lean();
+
+    res.status(200).json({
+      message: `User ${nextStatus === "blocked" ? "blocked" : "unblocked"} successfully`,
+      user: buildAdminUserResponse(user, profileInfo),
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+export const createUserByAdmin = async (req, res) => {
+  try {
+    const { firstName, lastName, email, phone, address = "", role = "staff" } = req.body;
+
+    if (!firstName || !lastName || !email || !phone) {
+      return res.status(400).json({
+        message: "First name, last name, email, and phone are required",
+      });
+    }
+
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: "Email already registered" });
+    }
+
+    const temporaryPassword = nanoid(10);
+    const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
+
+    const requestedRole = String(role).toLowerCase();
+    const normalizedRole =
+      requestedRole === "admin" || requestedRole === "staff"
+        ? "admin"
+        : "user";
+
+    const user = await User.create({
+      firstName,
+      lastName,
+      email,
+      phone,
+      password: hashedPassword,
+      role: normalizedRole,
+      status: "active",
+      ipAddress: req.ip,
+    });
+
+    const profileInfo = await ProfileInfo.findOneAndUpdate(
+      { userId: user._id },
+      {
+        $setOnInsert: { userId: user._id },
+        $set: {
+          firstName,
+          lastName,
+          fullName: `${firstName} ${lastName}`.trim(),
+          email,
+          phone,
+          address,
+        },
+      },
+      { new: true, upsert: true, runValidators: true }
+    );
+
+    await appendProfileActivity(user._id, {
+      type: "staff_added",
+      title: "Staff member added",
+      description: `${firstName} ${lastName} was added by an admin.`,
+      metadata: {
+        email,
+        role: user.role,
+      },
+    }).catch((error) => {
+      console.warn("Failed to append staff activity:", error.message);
+    });
+
+    res.status(201).json({
+      message: "User created successfully",
+      temporaryPassword,
+      user: buildAdminUserResponse(user, profileInfo?.toObject ? profileInfo.toObject() : profileInfo),
     });
   } catch (error) {
     res.status(500).json({

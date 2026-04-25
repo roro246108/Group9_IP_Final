@@ -12,7 +12,7 @@ function formatDate(dateStr) {
 }
 
 function getBookingViewStatus(booking) {
-  if (booking.status === "cancelled") return "cancelled";
+  if (String(booking.status || "").toLowerCase() === "cancelled") return "cancelled";
 
   if (booking.checkOut && new Date(booking.checkOut) < new Date()) {
     return "completed";

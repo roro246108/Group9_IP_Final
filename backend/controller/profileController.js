@@ -15,9 +15,10 @@ const PROFILE_INFO_FIELDS = [
 ];
 const MAX_ACTIVITY_HISTORY = 50;
 const MAX_BOOKING_SNAPSHOTS = 20;
+const isCancelledStatus = (value) => String(value || "").toLowerCase() === "cancelled";
 
 function getBookingSnapshotStatus(booking) {
-  if (booking?.status === "cancelled") {
+  if (isCancelledStatus(booking?.status)) {
     return "cancelled";
   }
 

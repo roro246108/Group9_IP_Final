@@ -5,10 +5,13 @@ const profileActivitySchema = new mongoose.Schema(
     type: {
       type: String,
       enum: [
+        "login",
         "booking_created",
         "booking_cancelled",
         "profile_updated",
         "password_changed",
+        "status_changed",
+        "staff_added",
       ],
       required: true,
     },

@@ -9,6 +9,7 @@ import Footer from "../Components/Footer";
 import { apiGet, apiPost } from "../services/apiClient";
 import { getSafeRoomImage, normalizeRoomRecord } from "../utils/roomMedia";
 import { useFavorites } from "../Context/FavoritesContext";
+import { getFallbackRooms } from "../utils/catalogFallbacks";
 import Background1 from "../assets/Images/Background.jpg";
 import Background2 from "../assets/Images/Background2.jpg";
 import Background3 from "../assets/Images/Backgroud3.jpg";
@@ -28,6 +29,11 @@ const DEFAULT_ROOM_TYPE_OPTIONS = ["Standard", "Deluxe", "Suite", "Penthouse"];
 export default function HotelListingPage() {
   const location = useLocation();
   const initialState = location.state || {};
+  const initialBranch = initialState.branch || "";
+  const initialCheckIn = initialState.checkIn || "";
+  const initialCheckOut = initialState.checkOut || "";
+  const initialGuests = initialState.guests || "";
+  const initialRoomType = initialState.roomType || "";
   const scrollRef = useRef(null);
   const availableRoomsRef = useRef(null);
   const { favoriteCount } = useFavorites();
@@ -50,14 +56,14 @@ export default function HotelListingPage() {
   };
 
   const [filters, setFilters] = useState({
-    destination: initialState.branch || "",
-    checkIn: initialState.checkIn || "",
-    checkOut: initialState.checkOut || "",
-    guests: normalizeGuests(initialState.guests) || "",
+    destination: initialBranch,
+    checkIn: initialCheckIn,
+    checkOut: initialCheckOut,
+    guests: normalizeGuests(initialGuests) || "",
     maxPrice: 1000,
-    roomType: initialState.roomType || "",
+    roomType: initialRoomType,
     type: "",
-    branch: initialState.branch || "",
+    branch: initialBranch,
     rating: "",
     sortBy: "popularity",
   });
@@ -101,13 +107,16 @@ export default function HotelListingPage() {
   const fetchAllRooms = async () => {
     try {
       const data = await apiGet("/rooms");
-      const normalizedRooms = data.map(normalizeRoomRecord);
+      const normalizedRooms = Array.isArray(data) && data.length > 0
+        ? data.map(normalizeRoomRecord)
+        : getFallbackRooms();
       setAllRooms(normalizedRooms);
       return normalizedRooms;
     } catch (error) {
       console.error("Failed to fetch rooms:", error.message);
-      setAllRooms([]);
-      return [];
+      const fallbackRooms = getFallbackRooms();
+      setAllRooms(fallbackRooms);
+      return fallbackRooms;
     }
   };
 
@@ -118,19 +127,28 @@ export default function HotelListingPage() {
         const databaseRooms = await fetchAllRooms();
 
         if (
-          initialState.branch &&
-          initialState.checkIn &&
-          initialState.checkOut &&
-          initialState.guests
+          initialBranch &&
+          initialCheckIn &&
+          initialCheckOut &&
+          initialGuests
         ) {
-          const data = await apiPost("/bookings/search", {
-            branch: initialState.branch,
-            roomType: initialState.roomType || "",
-            checkIn: initialState.checkIn,
-            checkOut: initialState.checkOut,
-            guests: Number(initialState.guests),
-          });
-          setRooms((data.rooms || []).map(normalizeRoomRecord));
+          try {
+            const data = await apiPost("/bookings/search", {
+              branch: initialBranch,
+              roomType: initialRoomType || "",
+              checkIn: initialCheckIn,
+              checkOut: initialCheckOut,
+              guests: Number(initialGuests),
+            });
+            setRooms((data.rooms || []).map(normalizeRoomRecord));
+          } catch {
+            setRooms(databaseRooms.filter((room) => {
+              const branchMatch = !initialBranch || room.branch === initialBranch;
+              const typeMatch = !initialRoomType || room.type === initialRoomType;
+              const guestsMatch = !initialGuests || room.guests >= Number(initialGuests);
+              return branchMatch && typeMatch && guestsMatch;
+            }));
+          }
           return;
         }
 
@@ -144,7 +162,7 @@ export default function HotelListingPage() {
     };
 
     loadInitialRooms();
-  }, []);
+  }, [initialBranch, initialCheckIn, initialCheckOut, initialGuests, initialRoomType]);
 
   useEffect(() => {
     const sliderInterval = setInterval(() => {
@@ -168,14 +186,6 @@ export default function HotelListingPage() {
     }, 150);
   };
 
-  const openSearchPopup = (title, message) => {
-    setSearchPopup({
-      open: true,
-      title,
-      message,
-    });
-  };
-
   const handleSearchClick = async (values) => {
     const updatedFilters = {
       ...filters,
@@ -191,36 +201,39 @@ export default function HotelListingPage() {
     try {
       setLoading(true);
 
-      const data = await apiPost("/bookings/search", {
-        branch: values.branch,
-        roomType: values.roomType || "",
-        checkIn: values.checkIn,
-        checkOut: values.checkOut,
-        guests: Number(values.guests),
-      });
+      try {
+        const data = await apiPost("/bookings/search", {
+          branch: values.branch,
+          roomType: values.roomType || "",
+          checkIn: values.checkIn,
+          checkOut: values.checkOut,
+          guests: Number(values.guests),
+        });
 
-      setFilters(updatedFilters);
-      setRooms((data.rooms || []).map(normalizeRoomRecord));
-      scrollToAvailableRooms();
+        setFilters(updatedFilters);
+        setRooms((data.rooms || []).map(normalizeRoomRecord));
+        scrollToAvailableRooms();
+      } catch {
+        const localResults = (allRooms.length > 0 ? allRooms : getFallbackRooms()).filter((room) => {
+          const branchMatch = !values.branch || room.branch === values.branch;
+          const typeMatch = !values.roomType || room.type === values.roomType;
+          const guestsMatch = !values.guests || room.guests >= Number(values.guests);
+          return branchMatch && typeMatch && guestsMatch && room.available;
+        });
+
+        setFilters(updatedFilters);
+        setRooms(localResults);
+        scrollToAvailableRooms();
+      }
     } catch (error) {
       console.error("Search failed:", error.message);
       setFilters(updatedFilters);
-      setRooms([]);
-
-      const message = error?.message || "Search failed. Please try different dates.";
-      const reservedPeriodMessage =
-        message.includes("Selected dates are unavailable for this room") ||
-        message.includes("These dates are reserved for this room type");
-
-      if (reservedPeriodMessage) {
-        openSearchPopup(
-          "Dates Already Reserved",
-          "This room is reserved in this period. Please change the date and try again."
-        );
-      } else {
-        openSearchPopup("Search Problem", message);
-      }
-
+      setRooms((allRooms.length > 0 ? allRooms : getFallbackRooms()).filter((room) => {
+        const branchMatch = !values.branch || room.branch === values.branch;
+        const typeMatch = !values.roomType || room.type === values.roomType;
+        const guestsMatch = !values.guests || room.guests >= Number(values.guests);
+        return branchMatch && typeMatch && guestsMatch && room.available;
+      }));
       scrollToAvailableRooms();
     } finally {
       setLoading(false);

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { MapPin, Calendar, Users, Bed, AlertTriangle, XCircle, X, Loader2 } from "lucide-react";
 import { getMyBookings, cancelMyBooking } from "../services/profileApi";
+import { useUser } from "../Context/UserContext";
 import { getSafeRoomImage } from "../utils/roomMedia";
 
 function formatDate(dateStr) {
@@ -13,7 +14,7 @@ function formatDate(dateStr) {
 }
 
 function isUpcoming(booking) {
-  if (booking.status === "cancelled") return false;
+  if (String(booking.status || "").toLowerCase() === "cancelled") return false;
   if (!booking.checkOut) return false;
   return new Date(booking.checkOut) >= new Date();
 }
@@ -71,7 +72,7 @@ function CancelModal({ booking, onConfirm, onClose, isCancelling }) {
   );
 }
 
-function BookingCard({ booking, onCancelled }) {
+function BookingCard({ booking, onCancelled, onProfileRefresh }) {
   const [showModal, setShowModal] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const bookingImage = getSafeRoomImage({
@@ -88,11 +89,16 @@ function BookingCard({ booking, onCancelled }) {
   const handleCancel = async () => {
     try {
       setIsCancelling(true);
-      await cancelMyBooking(booking._id);
+      await cancelMyBooking(booking._id || booking.id);
       setShowModal(false);
       onCancelled();
+      if (onProfileRefresh) {
+        onProfileRefresh().catch((err) =>
+          console.error("Failed to refresh profile after cancel:", err)
+        );
+      }
     } catch (err) {
-      console.error(err);
+      console.error("Failed to cancel booking:", err);
     } finally {
       setIsCancelling(false);
     }
@@ -204,6 +210,7 @@ function BookingCard({ booking, onCancelled }) {
 }
 
 export default function UpcomingStays() {
+  const { refreshUser } = useUser();
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -254,7 +261,12 @@ export default function UpcomingStays() {
       ) : (
         <div className="space-y-4">
           {bookings.map((booking) => (
-            <BookingCard key={booking._id} booking={booking} onCancelled={loadBookings} />
+            <BookingCard
+              key={booking._id}
+              booking={booking}
+              onCancelled={loadBookings}
+              onProfileRefresh={refreshUser}
+            />
           ))}
         </div>
       )}

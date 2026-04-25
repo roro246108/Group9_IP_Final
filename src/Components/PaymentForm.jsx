@@ -24,6 +24,17 @@ export default function PaymentForm({ room, nights, total, checkIn, checkOut }) 
       return;
     }
 
+    const pendingBooking = {
+      room,
+      nights,
+      total,
+      checkIn,
+      checkOut,
+      branch: room?.branch || "",
+      guests: room?.guests || 1,
+    };
+
+    sessionStorage.setItem("pendingBooking", JSON.stringify(pendingBooking));
     navigate("/payment", { state: { room, nights, total, checkIn, checkOut } });
   };
 

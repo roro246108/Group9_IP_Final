@@ -13,6 +13,7 @@ import {
 import Footer from "../Components/Footer";
 import { apiGet } from "../services/apiClient";
 import { normalizeHotelBranch } from "../utils/hotelBranches";
+import { getFallbackBranches } from "../utils/catalogFallbacks";
 
 export default function HotelDetails() {
   const [branches, setBranches] = useState([]);
@@ -25,16 +26,16 @@ export default function HotelDetails() {
         const data = await apiGet("/hotels");
         if (!isMounted) return;
 
-        const normalizedBranches = Array.isArray(data?.hotels)
+        const normalizedBranches = Array.isArray(data?.hotels) && data.hotels.length > 0
           ? data.hotels
               .filter((hotel) => hotel?.status !== "Inactive")
               .map(normalizeHotelBranch)
-          : [];
+          : getFallbackBranches();
 
         setBranches(normalizedBranches);
       } catch {
         if (isMounted) {
-          setBranches([]);
+          setBranches(getFallbackBranches());
         }
       }
     };

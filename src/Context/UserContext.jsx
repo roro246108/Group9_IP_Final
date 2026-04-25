@@ -21,6 +21,18 @@ function formatMemberSince(value) {
   return Number.isNaN(parsed.getTime()) ? "" : parsed.getFullYear().toString();
 }
 
+function buildAvatarInitials(firstName = "", lastName = "", fullName = "") {
+  const primary = `${firstName}`.trim();
+  const secondary = `${lastName}`.trim();
+
+  if (primary || secondary) {
+    return `${primary[0] || ""}${secondary[0] || ""}`.toUpperCase();
+  }
+
+  const words = `${fullName}`.trim().split(/\s+/).filter(Boolean);
+  return `${words[0]?.[0] || ""}${words[1]?.[0] || ""}`.toUpperCase();
+}
+
 function inferRoomType(roomName = "") {
   const normalized = String(roomName).toLowerCase();
 
@@ -31,7 +43,7 @@ function inferRoomType(roomName = "") {
 }
 
 function normalizeBookingStatus(rawBooking) {
-  if (rawBooking?.status === "cancelled") {
+  if (String(rawBooking?.status || "").toLowerCase() === "cancelled") {
     return "cancelled";
   }
 
@@ -83,7 +95,7 @@ function normalizeBooking(rawBooking) {
     status: normalizeBookingStatus(rawBooking),
     confirmationCode: buildConfirmationCode(rawBooking),
     image: branchImage || getRoomFallbackImage({ type: inferRoomType(room) }),
-    rating: rawBooking?.status === "cancelled" ? 0 : 5,
+    rating: normalizeBookingStatus(rawBooking) === "cancelled" ? 0 : 5,
     rawStatus: rawBooking?.status || "confirmed",
   };
 }
@@ -98,7 +110,12 @@ function buildUserProfile(authUser, currentProfile, bookings = []) {
     source.fullName?.trim() ||
     [firstName, lastName].filter(Boolean).join(" ").trim() ||
     "Guest User";
-  const initials = `${firstName[0] || ""}${lastName[0] || ""}`.toUpperCase();
+  const initials = buildAvatarInitials(firstName, lastName, fullName);
+  const derivedBookingStats = {
+    totalBooked: bookings.length,
+    totalCancelled: bookings.filter((booking) => booking.status === "cancelled").length,
+    totalCompleted: bookings.filter((booking) => booking.status === "completed").length,
+  };
 
   return {
     id: source._id || source.id || authUser?.id || "",
@@ -123,11 +140,8 @@ function buildUserProfile(authUser, currentProfile, bookings = []) {
     bio: source.bio || "",
     createdAt: source.createdAt || "",
     bookings,
-    bookingStats: source.bookingStats || {
-      totalBooked: bookings.length,
-      totalCancelled: bookings.filter((booking) => booking.status === "cancelled").length,
-      totalCompleted: bookings.filter((booking) => booking.status === "completed").length,
-    },
+    bookingStats: derivedBookingStats,
+    profileBookingStats: source.bookingStats || null,
     activityHistory: Array.isArray(source.activityHistory) ? source.activityHistory : [],
     totalBookings: bookings.length,
   };
@@ -188,13 +202,24 @@ export function UserProvider({ children }) {
   }, [currentUser, token]);
 
   const updateUser = (updatedData) => {
-    setUser((prevUser) => {
+      setUser((prevUser) => {
       if (!prevUser) return prevUser;
 
       const nextUser = {
         ...prevUser,
         ...updatedData,
+        firstName: updatedData.firstName ?? prevUser.firstName,
+        lastName: updatedData.lastName ?? prevUser.lastName,
+        fullName:
+          updatedData.fullName ??
+          `${updatedData.firstName ?? prevUser.firstName} ${updatedData.lastName ?? prevUser.lastName}`.trim(),
       };
+
+      nextUser.avatarInitials = buildAvatarInitials(
+        nextUser.firstName,
+        nextUser.lastName,
+        nextUser.fullName
+      );
 
       try {
         const storage = localStorage.getItem("user") ? localStorage : sessionStorage;
@@ -207,7 +232,7 @@ export function UserProvider({ children }) {
               ...storedUser,
               firstName: nextUser.firstName,
               lastName: nextUser.lastName,
-              fullName: `${nextUser.firstName} ${nextUser.lastName}`.trim(),
+              fullName: nextUser.fullName,
               email: nextUser.email,
               phone: nextUser.phone,
             })

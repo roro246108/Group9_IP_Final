@@ -1,11 +1,10 @@
-import React, { useState, useMemo } from "react";
-import { mockUsers, mockUserActivities } from "../store/mockData";
+import React, { useEffect, useMemo, useState } from "react";
 import { 
   Users, UserCheck, UserX, Briefcase, ShoppingBag, 
   Download, Search, Check, Mail, Phone, UserPlus, X 
 } from 'lucide-react';
 import useAdminThemeMode from "../hooks/useAdminThemeMode";
-import { logAuditEvent } from "../services/auditLogger";
+import { apiGet, apiPatch, apiPost } from "../services/apiClient";
 import AdminSidebar from "../Components/AdminSidebar";
 import AdminNavbar from "../Components/AdminNavbar";
 
@@ -36,8 +35,81 @@ const formatDate = (date, full = false) =>
       : { year: "numeric", month: "short", day: "numeric" }
   );
 
+const makeAvatarUrl = (user) =>
+  user.avatar ||
+  `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(
+    `${user.firstName || ""}${user.lastName || ""}`.trim() || user.email || String(user.id)
+  )}`;
+
+const formatActivitySummary = (activity = {}) => {
+  const meta = activity.metadata || {};
+
+  if (activity.type === "booking_created") {
+    const roomName = meta.roomName || activity.roomName || "Room";
+    const nights = Number(meta.nights || activity.nights || 0);
+    const bookedRoomLabel = nights > 0 ? `Booked "${roomName}" for ${nights} night${nights === 1 ? "" : "s"}` : `Booked "${roomName}"`;
+    return {
+      title: bookedRoomLabel,
+      details: [
+        meta.branch ? `Branch: ${meta.branch}` : "",
+        meta.checkIn ? `Check-in: ${formatDate(meta.checkIn)}` : "",
+        meta.checkOut ? `Check-out: ${formatDate(meta.checkOut)}` : "",
+      ].filter(Boolean),
+      time: activity.createdAt || activity.timestamp,
+    };
+  }
+
+  if (activity.type === "login") {
+    return {
+      title: "User logged into the system",
+      details: [
+        meta.loginAt ? `Login time: ${formatDate(meta.loginAt, true)}` : "",
+        meta.ipAddress ? `IP: ${meta.ipAddress}` : "",
+      ].filter(Boolean),
+      time: activity.createdAt || meta.loginAt || activity.timestamp,
+    };
+  }
+
+  if (activity.type === "status_changed") {
+    return {
+      title:
+        meta.nextStatus === "blocked"
+          ? "Account blocked"
+          : meta.nextStatus === "active"
+            ? "Account unblocked"
+            : activity.title || "Status updated",
+      details: [
+        meta.previousStatus ? `Previous: ${meta.previousStatus}` : "",
+        meta.nextStatus ? `Current: ${meta.nextStatus}` : "",
+      ].filter(Boolean),
+      time: activity.createdAt || activity.timestamp,
+    };
+  }
+
+  return {
+    title: activity.description || activity.title || "Activity update",
+    details: [],
+    time: activity.createdAt || activity.timestamp,
+  };
+};
+
+const normalizeUser = (user = {}) => ({
+  ...user,
+  id: user.id || user._id,
+  status: String(user.status || "active").toLowerCase(),
+  role: String(user.role || "customer").toLowerCase(),
+  displayRole: String(user.role || "customer").toLowerCase() === "admin" ? "staff" : "customer",
+  roleLabel: String(user.role || "customer").toLowerCase() === "admin" ? "Staff" : "Customer",
+  createdAt: user.createdAt || user.joinedDate || new Date().toISOString(),
+  joinedDate: user.createdAt || user.joinedDate || new Date().toISOString(),
+  avatar: makeAvatarUrl(user),
+  activityHistory: Array.isArray(user.activityHistory) ? user.activityHistory : [],
+});
+
 const ActivityModal = ({ user, onClose }) => {
-  const activities = mockUserActivities.filter(a => String(a.userId) === String(user.id));
+  const activities = [...(user.activityHistory || [])].sort(
+    (a, b) => new Date(b.createdAt || b.timestamp || 0) - new Date(a.createdAt || a.timestamp || 0)
+  );
   
   return (
     <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
@@ -50,7 +122,7 @@ const ActivityModal = ({ user, onClose }) => {
             </div>
             <div>
               <h3 className="font-semibold leading-tight">{user.firstName} {user.lastName}</h3>
-              <p className="text-[10px] text-blue-300 uppercase tracking-widest font-bold">{user.role} Activity Log</p>
+              <p className="text-[10px] text-blue-300 uppercase tracking-widest font-bold">{user.roleLabel || user.displayRole || user.role} Activity Log</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-blue-800 rounded-lg transition-colors text-white">
@@ -60,25 +132,39 @@ const ActivityModal = ({ user, onClose }) => {
         
         <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4 bg-slate-50/50">
           {activities.length ? activities.map(act => (
-            <div key={act.id} className={`flex gap-4 p-4 rounded-xl border bg-white shadow-sm transition-all hover:shadow-md ${act.action === 'booking_cancelled' ? 'border-red-100' : 'border-slate-100'}`}>
-              <div className={`p-2.5 rounded-xl h-fit shadow-sm ${ACTIVITY_UI[act.action]?.color || 'bg-slate-50'}`}>
+            <div key={act._id || act.id || `${act.type}-${act.createdAt}`} className={`flex gap-4 p-4 rounded-xl border bg-white shadow-sm transition-all hover:shadow-md ${act.type === 'booking_cancelled' ? 'border-red-100' : 'border-slate-100'}`}>
+              <div className={`p-2.5 rounded-xl h-fit shadow-sm ${ACTIVITY_UI[act.type]?.color || 'bg-slate-50'}`}>
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={ACTIVITY_UI[act.action]?.icon} />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={ACTIVITY_UI[act.type]?.icon} />
                 </svg>
               </div>
               <div className="flex-1">
+                {(() => {
+                  const summary = formatActivitySummary(act);
+                  return (
+                    <>
                 <div className="flex justify-between items-start">
-                    <p className={`text-sm font-bold ${act.action === 'booking_cancelled' ? 'text-red-900' : 'text-slate-800'}`}>
-                        {act.description}
+                    <p className={`text-sm font-bold ${act.type === 'booking_cancelled' ? 'text-red-900' : 'text-slate-800'}`}>
+                        {summary.title}
                     </p>
-                    <span className="text-[9px] font-black text-slate-300 uppercase tracking-tighter">{act.action.replace('_', ' ')}</span>
+                    <span className="text-[9px] font-black text-slate-300 uppercase tracking-tighter">{String(act.type || "").replace('_', ' ')}</span>
                 </div>
+                {summary.details.length > 0 && (
+                  <div className="mt-2 space-y-1 rounded-xl bg-slate-50 px-3 py-2 text-[11px] font-semibold text-slate-500">
+                    {summary.details.map((line) => (
+                      <p key={line}>{line}</p>
+                    ))}
+                  </div>
+                )}
                 <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-50">
-                    <p className="text-[10px] font-medium text-slate-400">{formatDate(act.timestamp, true)}</p>
+                    <p className="text-[10px] font-medium text-slate-400">{formatDate(summary.time, true)}</p>
                     <div className="flex items-center gap-2">
                         <span className="text-[9px] font-bold text-slate-300 uppercase">Activity Logged</span>
                     </div>
                 </div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           )) : (
@@ -86,7 +172,7 @@ const ActivityModal = ({ user, onClose }) => {
                 <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
                     <Search className="w-8 h-8 text-slate-300" />
                 </div>
-                <p className="text-slate-400 font-bold">No activity logs found for this {user.role}.</p>
+                <p className="text-slate-400 font-bold">No activity logs found for this {user.roleLabel || user.displayRole || user.role}.</p>
                 <p className="text-xs text-slate-300 mt-1">Actions performed by this user will appear here.</p>
             </div>
           )}
@@ -103,7 +189,9 @@ const ActivityModal = ({ user, onClose }) => {
 const UserManagement = () => {
   const { darkMode } = useAdminThemeMode();
   const [collapsed, setCollapsed] = useState(false);
-  const [users, setUsers] = useState(mockUsers);
+  const [users, setUsers] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [filters, setFilters] = useState({
     search: "",
     role: "all",
@@ -123,13 +211,48 @@ const UserManagement = () => {
     address: '',
   });
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadUsers = async () => {
+      try {
+        setLoadingUsers(true);
+        setLoadError("");
+
+        const data = await apiGet("/auth/users");
+        if (!isMounted) return;
+
+        const normalizedUsers = Array.isArray(data?.users)
+          ? data.users.map(normalizeUser)
+          : [];
+
+        setUsers(normalizedUsers);
+      } catch (error) {
+        if (isMounted) {
+          setUsers([]);
+          setLoadError(error.message || "Failed to load users.");
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingUsers(false);
+        }
+      }
+    };
+
+    loadUsers();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const filteredUsers = useMemo(() => {
     return users.filter((u) => {
       const matchesSearch =
         filters.search === "" ||
         `${u.firstName} ${u.lastName}`.toLowerCase().includes(filters.search.toLowerCase()) ||
         u.email.toLowerCase().includes(filters.search.toLowerCase());
-      const matchesRole = filters.role === "all" || u.role === filters.role;
+      const matchesRole = filters.role === "all" || u.displayRole === filters.role;
       const matchesStatus = filters.status === "all" || u.status === filters.status;
       return matchesSearch && matchesRole && matchesStatus;
     });
@@ -137,25 +260,34 @@ const UserManagement = () => {
 
   const handleAddStaff = (e) => {
     e.preventDefault();
-    const staffEntry = {
-      id: String(Date.now()),
-      ...newStaff,
-      role: 'staff',
-      status: 'active',
-      joinedDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${newStaff.firstName}${Date.now()}`
-    };
-
-    setUsers([staffEntry, ...users]);
-    setIsAddUserOpen(false);
-    setNewStaff({ firstName: '', lastName: '', email: '', phone: '', address: '' });
-    setShowSuccess(true);
-    setTimeout(() => setShowSuccess(false), 3000);
+    apiPost("/auth/users", {
+      firstName: newStaff.firstName,
+      lastName: newStaff.lastName,
+      email: newStaff.email,
+      phone: newStaff.phone,
+      address: newStaff.address,
+      role: "admin",
+    })
+      .then((data) => {
+        const createdUser = normalizeUser(data?.user || {});
+        setUsers((prev) => [createdUser, ...prev]);
+        setIsAddUserOpen(false);
+        setNewStaff({ firstName: '', lastName: '', email: '', phone: '', address: '' });
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 3000);
+        if (data?.temporaryPassword) {
+          alert(`Staff profile created. Temporary password: ${data.temporaryPassword}`);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to create staff member:", error.message);
+        alert(error.message || "Failed to create staff member.");
+      });
   };
 
   const handleDownloadReport = () => {
     const headers = ["ID", "Name", "Email", "Role", "Status", "Joined Date"];
-    const rows = filteredUsers.map(u => [u.id, `"${u.firstName} ${u.lastName}"`, u.email, u.role, u.status, u.joinedDate || 'N/A']);
+    const rows = filteredUsers.map(u => [u.id, `"${u.firstName} ${u.lastName}"`, u.email, u.roleLabel || u.displayRole || u.role, u.status, u.joinedDate || 'N/A']);
     const csvContent = [headers.join(","), ...rows.map(row => row.join(","))].join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -172,16 +304,6 @@ const UserManagement = () => {
     setShowSuccess(true);
     setTimeout(() => setShowSuccess(false), 3000);
 
-    logAuditEvent({
-      actionType: "users.report.downloaded",
-      module: "user_management",
-      entityType: "report",
-      entityId: "users_csv",
-      targetLabel: "User CSV report",
-      status: "success",
-      reason: "Admin exported user report",
-      after: { totalRows: filteredUsers.length },
-    });
   };
 
   const totalPages = Math.ceil(filteredUsers.length / itemsPerPage);
@@ -189,24 +311,22 @@ const UserManagement = () => {
   const currentData = filteredUsers.slice(startIndex, startIndex + itemsPerPage);
 
   const toggleStatus = (id) => {
-    setUsers(prev => prev.map(u => 
-      u.id === id ? { ...u, status: u.status === 'active' ? 'blocked' : 'active' } : u
-    ));
-
     const target = users.find((u) => u.id === id);
     if (target) {
       const nextStatus = target.status === "active" ? "blocked" : "active";
-      logAuditEvent({
-        actionType: "user.status.updated",
-        module: "user_management",
-        entityType: "user",
-        entityId: id,
-        targetLabel: `${target.firstName} ${target.lastName}`,
-        status: "success",
-        reason: `Status changed to ${nextStatus}`,
-        before: { status: target.status },
-        after: { status: nextStatus },
-      });
+      apiPatch(`/auth/users/${id}/status`, { status: nextStatus })
+        .then((data) => {
+          const updatedUser = normalizeUser(data?.user || {});
+          setUsers((prev) =>
+            prev.map((u) => (u.id === id ? { ...u, ...updatedUser } : u))
+          );
+          setSelectedUser((prev) => (prev && prev.id === id ? { ...prev, ...updatedUser } : prev));
+          setShowSuccess(true);
+          setTimeout(() => setShowSuccess(false), 3000);
+        })
+        .catch((error) => {
+          console.error("Failed to update user status:", error.message);
+        });
     }
   };
 
@@ -214,8 +334,8 @@ const UserManagement = () => {
     { label: 'Total Users', val: users.length, icon: Users, color: 'text-blue-600', bg: 'bg-blue-500', hover: 'hover:border-blue-400 hover:shadow-blue-100 hover:bg-blue-50' },
     { label: 'Active', val: users.filter(u => u.status === 'active').length, icon: UserCheck, color: 'text-emerald-600', bg: 'bg-emerald-500', hover: 'hover:border-emerald-400 hover:shadow-emerald-100 hover:bg-emerald-50' },
     { label: 'Blocked', val: users.filter(u => u.status === 'blocked').length, icon: UserX, color: 'text-pink-600', bg: 'bg-pink-500', hover: 'hover:border-pink-400 hover:shadow-pink-100 hover:bg-pink-50' },
-    { label: 'Staff Members', val: users.filter(u => u.role === 'staff').length, icon: Briefcase, color: 'text-orange-600', bg: 'bg-orange-500', hover: 'hover:border-orange-400 hover:shadow-orange-100 hover:bg-orange-50' },
-    { label: 'Customers', val: users.filter(u => u.role === 'customer').length, icon: ShoppingBag, color: 'text-blue-600', bg: 'bg-blue-500', hover: 'hover:border-blue-400 hover:shadow-blue-100 hover:bg-blue-50' }
+    { label: 'Staff Members', val: users.filter(u => u.displayRole === 'staff').length, icon: Briefcase, color: 'text-orange-600', bg: 'bg-orange-500', hover: 'hover:border-orange-400 hover:shadow-orange-100 hover:bg-orange-50' },
+    { label: 'Customers', val: users.filter(u => u.displayRole === 'customer').length, icon: ShoppingBag, color: 'text-blue-600', bg: 'bg-blue-500', hover: 'hover:border-blue-400 hover:shadow-blue-100 hover:bg-blue-50' }
   ];
 
   return (
@@ -248,6 +368,12 @@ const UserManagement = () => {
           Download Report
         </button>
       </div>
+
+      {loadError && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+          {loadError}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
         {stats.map((s) => (
@@ -315,7 +441,13 @@ const UserManagement = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 text-sm">
-              {currentData.length > 0 ? currentData.map(u => (
+              {loadingUsers ? (
+                <tr>
+                  <td colSpan="6" className="px-8 py-24 text-center text-slate-400 font-bold text-lg">
+                    Loading users...
+                  </td>
+                </tr>
+              ) : currentData.length > 0 ? currentData.map(u => (
                 <tr key={u.id} className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-8 py-5">
                     <div className="flex items-center gap-4">
@@ -341,12 +473,12 @@ const UserManagement = () => {
                       </div>
                     </div>
                   </td>
-                  <td className="px-8 py-5 text-slate-500 font-semibold">{u.joinedDate || 'Mar 15, 2022'}</td>
+                  <td className="px-8 py-5 text-slate-500 font-semibold">{formatDate(u.createdAt)}</td>
                   <td className="px-8 py-5">
                     <span className={`px-4 py-1.5 rounded-xl font-black text-[10px] uppercase tracking-wider ${
-                      u.role === 'staff' ? 'bg-orange-50 text-orange-600 border border-orange-100' : 'bg-blue-50 text-blue-600 border border-blue-100'
+                      u.displayRole === 'staff' ? 'bg-orange-50 text-orange-600 border border-orange-100' : 'bg-blue-50 text-blue-600 border border-blue-100'
                     }`}>
-                      {u.role}
+                      {u.roleLabel}
                     </span>
                   </td>
                   <td className="px-8 py-5">
@@ -359,7 +491,12 @@ const UserManagement = () => {
                       <button onClick={() => setSelectedUser(u)} className="p-2.5 text-slate-400 hover:bg-blue-50 hover:text-blue-600 rounded-xl transition-all" title="View Activity">
                         <Search className="w-5 h-5" />
                       </button>
-                      <button onClick={() => toggleStatus(u.id)} className={`p-2.5 rounded-xl transition-all ${u.status === 'active' ? 'text-slate-400 hover:bg-pink-50 hover:text-pink-600' : 'text-emerald-600 hover:bg-emerald-50'}`}>
+                      <button
+                        onClick={() => toggleStatus(u.id)}
+                        className={`p-2.5 rounded-xl transition-all ${u.status === 'active' ? 'text-slate-400 hover:bg-pink-50 hover:text-pink-600' : 'text-emerald-600 hover:bg-emerald-50'}`}
+                        title={u.status === "active" ? "Block user" : "Unblock user"}
+                        aria-label={u.status === "active" ? "Block user" : "Unblock user"}
+                      >
                         {u.status === 'active' ? <UserX className="w-5 h-5" /> : <UserCheck className="w-5 h-5" />}
                       </button>
                     </div>

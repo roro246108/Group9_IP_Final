@@ -18,14 +18,22 @@ export default function PaymentPage({ room: propsRoom, nights: propsNights, tota
 
   const location = useLocation();
   const locationState = location.state || {};
+  const pendingBooking = (() => {
+    try {
+      const raw = sessionStorage.getItem("pendingBooking");
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  })();
   
-  const room = locationState.room || propsRoom;
-  const nights = locationState.nights || propsNights;
-  const total = locationState.total || propsTotal;
-  const checkIn = locationState.checkIn || "";
-  const checkOut = locationState.checkOut || "";
-  const branch = locationState.branch || room?.branch || "";
-  const guests = locationState.guests || room?.guests || 1;
+  const room = locationState.room || pendingBooking.room || propsRoom || null;
+  const nights = locationState.nights || pendingBooking.nights || propsNights || 0;
+  const total = locationState.total || pendingBooking.total || propsTotal || 0;
+  const checkIn = locationState.checkIn || pendingBooking.checkIn || "";
+  const checkOut = locationState.checkOut || pendingBooking.checkOut || "";
+  const branch = locationState.branch || pendingBooking.branch || room?.branch || "";
+  const guests = locationState.guests || pendingBooking.guests || room?.guests || 1;
 
   const [email, setEmail] = useState("");
   const [cardNumber, setCardNumber] = useState("");
@@ -117,6 +125,7 @@ export default function PaymentPage({ room: propsRoom, nights: propsNights, tota
 
     await createBooking({
       roomId: room?._id || room?.id,
+      roomKey: room?._id || room?.id || "",
       name,
       email,
       phone,
@@ -140,6 +149,7 @@ export default function PaymentPage({ room: propsRoom, nights: propsNights, tota
       checkOut: checkOut || new Date().toISOString(),
     }, token);
 
+    sessionStorage.removeItem("pendingBooking");
     setError("");
     alert("Payment Successful");
 

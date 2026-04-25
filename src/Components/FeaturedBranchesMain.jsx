@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { MapPin } from "lucide-react";
 import { apiGet } from "../services/apiClient";
 import { normalizeHotelBranch } from "../utils/hotelBranches";
+import { getFallbackBranches } from "../utils/catalogFallbacks";
 
 export default function FeaturedBranchesPreview() {
   const [branches, setBranches] = useState([]);
@@ -15,17 +16,17 @@ export default function FeaturedBranchesPreview() {
         const data = await apiGet("/hotels");
         if (!isMounted) return;
 
-        const normalizedBranches = Array.isArray(data?.hotels)
+        const normalizedBranches = Array.isArray(data?.hotels) && data.hotels.length > 0
           ? data.hotels
               .filter((hotel) => hotel?.status !== "Inactive")
               .map(normalizeHotelBranch)
               .slice(0, 3)
-          : [];
+          : getFallbackBranches().slice(0, 3);
 
         setBranches(normalizedBranches);
       } catch {
         if (isMounted) {
-          setBranches([]);
+          setBranches(getFallbackBranches().slice(0, 3));
         }
       }
     };

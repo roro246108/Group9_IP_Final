@@ -1,7 +1,8 @@
 import { Link, useNavigate } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import MainBackground from "../assets/Images/home_video.mp4";
+import hotels from "../data/hotels";
 
 export default function HomeMainSection() {
   const navigate = useNavigate();
@@ -12,26 +13,7 @@ export default function HomeMainSection() {
   const [checkOut, setCheckOut] = useState("");
   const [guests, setGuests] = useState("1");
   const [loading, setLoading] = useState(false);
-  const [roomTypes, setRoomTypes] = useState([]);
-
-  useEffect(() => {
-    const fetchRoomTypes = async () => {
-      try {
-        const response = await fetch("http://localhost:5050/api/rooms");
-        const data = await response.json();
-        
-        // Extract unique room types from the database
-        const uniqueTypes = [...new Set(data.map(room => room.type))].sort();
-        setRoomTypes(uniqueTypes);
-      } catch (error) {
-        console.error("Failed to fetch room types:", error);
-        // Fallback to default room types
-        setRoomTypes(["Standard", "Deluxe", "Suite", "Penthouse"]);
-      }
-    };
-
-    fetchRoomTypes();
-  }, []);
+  const roomTypes = [...new Set(hotels.map((room) => room.type))].sort();
 
   const isPastDate = (dateString) => {
     const today = new Date();
@@ -65,29 +47,33 @@ export default function HomeMainSection() {
     try {
       setLoading(true);
 
-      const response = await fetch("http://localhost:5050/api/bookings/search", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          branch,
-          roomType,
-          checkIn,
-          checkOut,
-          guests: Number(guests),
-        }),
-      });
+      try {
+        const response = await fetch("http://localhost:5050/api/bookings/search", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            branch,
+            roomType,
+            checkIn,
+            checkOut,
+            guests: Number(guests),
+          }),
+        });
 
-      const data = await response.json().catch(() => ({}));
+        const data = await response.json().catch(() => ({}));
 
-      if (!response.ok) {
-        const message =
-          response.status === 409
-            ? "This room is already reserved for these dates."
-            : data.message || "No rooms available matching your criteria.";
-        alert(message);
-        return;
+        if (!response.ok) {
+          const message =
+            response.status === 409
+              ? "This room is already reserved for these dates."
+              : data.message || "No rooms available matching your criteria.";
+          alert(message);
+          return;
+        }
+      } catch {
+        console.warn("Booking search API is unavailable. Falling back to local room search.");
       }
 
       navigate("/hotels", {
@@ -101,7 +87,15 @@ export default function HomeMainSection() {
       });
     } catch (error) {
       console.error("Search error:", error);
-      alert("Failed to connect to server.");
+      navigate("/hotels", {
+        state: {
+          branch,
+          roomType,
+          checkIn,
+          checkOut,
+          guests: Number(guests),
+        },
+      });
     } finally {
       setLoading(false);
     }

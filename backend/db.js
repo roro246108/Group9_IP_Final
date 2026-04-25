@@ -36,32 +36,17 @@ const connectDB = async () => {
   }
 
   try {
-    const candidates = [
-      process.env.MONGO_URI.startsWith("mongodb+srv")
-        ? buildDirectAtlasUri(process.env.MONGO_URI)
-        : process.env.MONGO_URI,
-      process.env.MONGO_URI,
-      "mongodb://127.0.0.1:27017/hotel-booking",
-    ];
+    const uri = process.env.MONGO_URI.startsWith("mongodb+srv")
+      ? buildDirectAtlasUri(process.env.MONGO_URI)
+      : process.env.MONGO_URI;
 
-    let lastError = null;
+    await mongoose.connect(uri, {
+      dbName: configuredDbName,
+      serverSelectionTimeoutMS: 10000,
+    });
 
-    for (const uri of candidates) {
-      if (!uri) continue;
-      try {
-        await mongoose.connect(uri, {
-          dbName: configuredDbName,
-          serverSelectionTimeoutMS: 10000,
-        });
-        console.log(`MongoDB connected successfully to ${mongoose.connection.name}`);
-        return;
-      } catch (error) {
-        lastError = error;
-        console.warn(`MongoDB connection failed for ${uri.startsWith("mongodb+srv") ? "Atlas" : "local"} URI:`, error.message);
-      }
-    }
-
-    throw lastError || new Error("Unable to connect to MongoDB");
+    console.log(`MongoDB connected successfully to ${mongoose.connection.name}`);
+    console.log(`MongoDB booking writes will use collection: bookings`);
   } catch (error) {
     console.error("DB connection error:", error.message);
     throw error;

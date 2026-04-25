@@ -7,6 +7,8 @@ import Footer from "../Components/Footer";
 import { apiGet } from "../services/apiClient";
 import { normalizeRoomRecord } from "../utils/roomMedia";
 import { normalizeHotelBranch } from "../utils/hotelBranches";
+import { branchDetails as staticBranchDetails } from "../data/hotels";
+import { getFallbackRooms } from "../utils/catalogFallbacks";
 
 export default function UserBranchDetails() {
   const { slug } = useParams();
@@ -24,21 +26,39 @@ export default function UserBranchDetails() {
         setLoadingRooms(true);
         setRoomsError("");
         const [hotelsData, roomsData] = await Promise.all([
-          apiGet("/hotels"),
-          apiGet("/rooms"),
+          apiGet("/hotels").catch(() => ({ hotels: [] })),
+          apiGet("/rooms").catch(() => []),
         ]);
 
         if (!isMounted) return;
 
-        const matchedBranch = Array.isArray(hotelsData?.hotels)
+        const apiBranches = Array.isArray(hotelsData?.hotels)
           ? hotelsData.hotels
               .filter((hotel) => hotel?.status !== "Inactive")
               .map(normalizeHotelBranch)
-              .find((branch) => branch.slug === slug)
-          : null;
+          : [];
+        const fallbackBranches = staticBranchDetails.map((branch) => ({
+          _id: branch.slug,
+          id: branch.slug,
+          slug: branch.slug,
+          title: branch.title,
+          name: branch.title,
+          description: branch.description,
+          image: branch.image,
+          fallbackImage: branch.image,
+          badge: branch.badge,
+          features: branch.features || [],
+          amenities: branch.features || [],
+          location: branch.title.replace(" Branch", ""),
+        }));
+        const matchedBranch =
+          [...apiBranches, ...fallbackBranches].find((branch) => branch.slug === slug) || null;
 
         setSelectedBranch(matchedBranch || null);
-        setRooms(Array.isArray(roomsData) ? roomsData.map(normalizeRoomRecord) : []);
+        const normalizedRooms = Array.isArray(roomsData) && roomsData.length > 0
+          ? roomsData.map(normalizeRoomRecord)
+          : getFallbackRooms();
+        setRooms(normalizedRooms);
       } catch (error) {
         console.error("Error fetching rooms:", error);
         if (isMounted) {
@@ -105,7 +125,7 @@ export default function UserBranchDetails() {
   };
 
   const branchRooms = rooms
-    .filter((room) => room.branch === selectedBranch.title)
+    .filter((room) => room.branch === selectedBranch.title || room.branch === selectedBranch.name)
     .map((room) => ({
       ...room,
       cardDescription: roomDescriptionByType[room.type] || room.roomName,

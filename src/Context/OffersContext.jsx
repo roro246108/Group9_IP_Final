@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import * as offersService from "../services/offersService";
 import { apiGet } from "../services/apiClient";
 import { getSafeRoomImage, normalizeRoomRecord } from "../utils/roomMedia";
+import { getFallbackOffers, getFallbackRooms } from "../utils/catalogFallbacks";
 
 const OffersContext = createContext();
 
@@ -67,6 +68,11 @@ function matchRoomForOffer(offer, rooms) {
 
 function mapToUserFormat(adminOffer, rooms) {
   const room = matchRoomForOffer(adminOffer, rooms);
+  const rawExpiry = adminOffer.expiryDate || adminOffer.expiresAt;
+  const expiryDate = new Date(rawExpiry);
+  const safeExpiryDate = Number.isNaN(expiryDate.getTime())
+    ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+    : expiryDate.toISOString();
 
   return {
     ...adminOffer,
@@ -74,7 +80,7 @@ function mapToUserFormat(adminOffer, rooms) {
     discountedPrice: Number(adminOffer.pricePerNight) || 0,
     discountPercent: Number(adminOffer.discount) || 0,
     originalPrice: Number(adminOffer.originalPrice) || 0,
-    expiresAt: new Date(adminOffer.expiryDate).toISOString(),
+    expiresAt: safeExpiryDate,
     category: adminOffer.type,
     tag: adminOffer.badge,
     tagColor: getTagColor(adminOffer.badge, adminOffer.type),
@@ -109,15 +115,24 @@ export function OffersProvider({ children }) {
       try {
         setLoading(true);
         const [offersData, roomsData] = await Promise.all([
-          offersService.fetchOffers(),
+          offersService.fetchOffers().catch(() => []),
           apiGet("/rooms").catch(() => []),
         ]);
 
-        setOffers(Array.isArray(offersData) ? offersData : []);
-        setRooms(Array.isArray(roomsData) ? roomsData.map(normalizeRoomRecord) : []);
+        const normalizedOffers = Array.isArray(offersData) && offersData.length > 0
+          ? offersData
+          : getFallbackOffers();
+        const normalizedRooms = Array.isArray(roomsData) && roomsData.length > 0
+          ? roomsData.map(normalizeRoomRecord)
+          : getFallbackRooms();
+
+        setOffers(normalizedOffers);
+        setRooms(normalizedRooms);
         setError(null);
-      } catch (err) {
-        setError(err.message);
+      } catch {
+        setOffers(getFallbackOffers());
+        setRooms(getFallbackRooms());
+        setError(null);
       } finally {
         setLoading(false);
       }
