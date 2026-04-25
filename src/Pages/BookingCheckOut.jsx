@@ -30,6 +30,25 @@ function mergeOfferIntoRoom(baseRoom = {}, sourceRoom = {}) {
   };
 }
 
+function getAvailabilityMessage(error) {
+  const reason = error?.response?.data?.reason;
+  const message = error?.response?.data?.message;
+
+  const fallbackMessages = {
+    room_not_found: message || "We could not find this room in the database.",
+    room_reserved:
+      message || "This room is already reserved for the selected dates.",
+    room_manually_blocked:
+      message || "This room is blocked in the room calendar for those dates.",
+  };
+
+  if (reason && fallbackMessages[reason]) {
+    return fallbackMessages[reason];
+  }
+
+  return message || "Error checking availability. Please try again.";
+}
+
 export default function RoomBooking() {
   const location = useLocation();
   const roomFromNavigation = location.state?.room || location.state?.selectedRoom;
@@ -40,6 +59,11 @@ export default function RoomBooking() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [roomLoading, setRoomLoading] = useState(false);
+  const [availabilityNotice, setAvailabilityNotice] = useState({
+    open: false,
+    title: "",
+    message: "",
+  });
   const [room, setRoom] = useState(
     roomFromNavigation ? normalizeRoomRecord(roomFromNavigation) : null
   );
@@ -112,13 +136,18 @@ export default function RoomBooking() {
         const calculatedTotal = calculateTotal(calculatedNights, room.price);
         setNights(calculatedNights);
         setTotal(calculatedTotal);
-        alert(`Room is available for ${calculatedNights} nights`);
+        setAvailabilityNotice({
+          open: true,
+          title: "Room Available",
+          message: `This room is available for ${calculatedNights} nights.`,
+        });
       }
     } catch (error) {
-      alert(
-        error.response?.data?.message ||
-          "Error checking availability. Please try again."
-      );
+      setAvailabilityNotice({
+        open: true,
+        title: "Room Unavailable",
+        message: getAvailabilityMessage(error),
+      });
     } finally {
       setLoading(false);
     }
@@ -187,6 +216,42 @@ export default function RoomBooking() {
           </div>
         </div>
       </div>
+
+      {availabilityNotice.open && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 px-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-xl font-semibold text-[#1e3a8a]">
+                {availabilityNotice.title}
+              </h3>
+              <button
+                type="button"
+                onClick={() =>
+                  setAvailabilityNotice({ open: false, title: "", message: "" })
+                }
+                className="rounded-full px-2 py-1 text-2xl leading-none text-gray-400 hover:text-gray-700"
+                aria-label="Close availability message"
+              >
+                &times;
+              </button>
+            </div>
+            <p className="text-sm leading-6 text-gray-700">
+              {availabilityNotice.message}
+            </p>
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() =>
+                  setAvailabilityNotice({ open: false, title: "", message: "" })
+                }
+                className="rounded-xl bg-[#1e3a8a] px-5 py-2.5 text-sm font-semibold text-white"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

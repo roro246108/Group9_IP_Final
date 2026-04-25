@@ -7,6 +7,25 @@ import { useState } from "react";
 import axios from "axios";
 import { calculateNights, calculateTotal } from "../hooks/useBookingpayment";
 
+function getAvailabilityMessage(error) {
+  const reason = error?.response?.data?.reason;
+  const message = error?.response?.data?.message;
+
+  const fallbackMessages = {
+    room_not_found: message || "We could not find this room in the database.",
+    room_reserved:
+      message || "This room is already reserved for the selected dates.",
+    room_manually_blocked:
+      message || "This room is blocked in the room calendar for those dates.",
+  };
+
+  if (reason && fallbackMessages[reason]) {
+    return fallbackMessages[reason];
+  }
+
+  return message || "Error checking availability. Please try again.";
+}
+
 export default function RoomBooking(){
 
   const [checkIn, setCheckIn] = useState("");
@@ -47,7 +66,7 @@ export default function RoomBooking(){
       alert(`Room is available for ${calculatedNights} nights`);
     }
   } catch (error) {
-    alert(error.response?.data?.message || "Error checking availability. Please try again.");
+    alert(getAvailabilityMessage(error));
   } finally {
     setLoading(false);
   }

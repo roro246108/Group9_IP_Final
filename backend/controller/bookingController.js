@@ -417,6 +417,8 @@ export const searchAvailability = async (req, res) => {
     console.log("Incoming search body:", {
       branch,
       roomType,
+      roomId,
+      roomName,
       checkIn,
       checkOut,
       guests,
@@ -424,18 +426,42 @@ export const searchAvailability = async (req, res) => {
 
     console.log("Room query:", roomQuery);
 
-    const matchingRooms = await Room.find(roomQuery);
-    console.log("Matching rooms found:", matchingRooms.length);
-
-    const manuallyAvailableRooms = matchingRooms.filter(
-      (room) => !roomHasManualBlock(room, stayDateKeys)
-    );
-
     const bookingQuery = {
       status: { $nin: ["cancelled", "Cancelled"] },
       checkIn: { $lt: checkOutDate },
       checkOut: { $gt: checkInDate },
     };
+
+    const matchingRooms = await Room.find(roomQuery);
+    console.log("Matching rooms found:", matchingRooms.length);
+
+    if (matchingRooms.length === 0) {
+      return res.status(404).json({
+        available: false,
+        reason: "room_not_found",
+        message: roomId
+          ? `No room record was found for room id ${roomId}.`
+          : "No room record matched the selected room details.",
+        debug: {
+          roomId: roomId || "",
+          roomName: roomName || "",
+          branch: branch || "",
+          roomType: roomType || "",
+        },
+      });
+    }
+
+    const manuallyAvailableRooms = matchingRooms.filter(
+      (room) => !roomHasManualBlock(room, stayDateKeys)
+    );
+
+    if (manuallyAvailableRooms.length === 0) {
+      return res.status(409).json({
+        available: false,
+        reason: "room_manually_blocked",
+        message: "This room is marked as reserved in the room calendar.",
+      });
+    }
 
     const overlapConditions =
       manuallyAvailableRooms.length > 0
@@ -481,25 +507,14 @@ export const searchAvailability = async (req, res) => {
     console.log("Matching bookings:", overlappingBookings);
 
     if (availableRooms.length === 0) {
-      if (requestedBookingConditions.length > 0) {
-        const directBookingMatches = await Booking.find({
-          ...bookingQuery,
-          $or: requestedBookingConditions,
+      if (overlappingBookings.length > 0) {
+        return res.status(409).json({
+          reason: "room_reserved",
+          message:
+            "This room is already reserved for the selected dates. Please choose different dates.",
+          available: false,
         });
-
-        if (directBookingMatches.length > 0) {
-          return res.status(409).json({
-            message:
-              "This room is already reserved for the selected dates. Please choose different dates.",
-            available: false,
-          });
-        }
       }
-
-      return res.status(404).json({
-        message: "Selected room details were not found in the database.",
-        available: false,
-      });
     }
 
     return res.status(200).json({
