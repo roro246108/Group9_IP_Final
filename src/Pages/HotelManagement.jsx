@@ -11,7 +11,7 @@ import SharmBranchImg from "../assets/Images/Sharm_Branch.png";
 import AlexBranchImg from "../assets/Images/Alex_Branch.png";
 import MarsaAlamBranchImg from "../assets/Images/MrasaAlam_Branch.avif";
 
-const API_BASE_URL = "http://localhost:5050";
+const API_BASE_URL = "http://localhost:5050/api";
 
 const branchImageByKey = {
   "alexandria branch": AlexBranchImg,
@@ -217,7 +217,6 @@ function HotelManagement() {
           ...newBranchData,
           rating: Number(newBranchData.rating) || 0,
           amenities: newBranchData.amenities || [],
-          rooms: newBranchData.rooms || [],
         }),
       });
 
@@ -567,8 +566,8 @@ function HotelManagement() {
                             : "bg-[#F5EFEB] text-[#2F4156]"
                         }`}
                       >
-                        <span className="font-semibold">Total Rooms Types:</span>{" "}
-                        {branch.rooms?.length || 0}
+                        <span className="font-semibold">Rooms Module:</span>{" "}
+                        Managed separately in Room Management
                       </div>
 
                       <div className="flex flex-wrap gap-2">
@@ -954,22 +953,15 @@ function HotelManagement() {
                             darkMode ? "text-gray-300" : "text-[#567C8D]"
                           }`}
                         >
-                          Room Types in this Branch
+                          Rooms
                         </p>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {(branchToView.rooms || []).map((room, index) => (
-                            <span
-                              key={room._id || room.id || index}
-                              className={`rounded-full px-3 py-1 text-xs font-medium ${
-                                darkMode
-                                  ? "border border-gray-600 bg-gray-800 text-white"
-                                  : "border border-[#C8D9E6] bg-white text-[#2F4156]"
-                              }`}
-                            >
-                              {room.roomName}
-                            </span>
-                          ))}
-                        </div>
+                        <p
+                          className={`mt-2 text-sm ${
+                            darkMode ? "text-gray-300" : "text-[#567C8D]"
+                          }`}
+                        >
+                          Rooms are managed separately in the Room Management module to avoid data redundancy.
+                        </p>
                       </div>
 
                       <div className="grid gap-4 sm:grid-cols-2">
@@ -1022,7 +1014,11 @@ function HotelManagement() {
                   >
                     {t("hotelMgmt.delete.promptPrefix")}{" "}
                     <span
-                      className={darkMode ? "font-semibold text-white" : "font-semibold text-[#2F4156]"}
+                      className={
+                        darkMode
+                          ? "font-semibold text-white"
+                          : "font-semibold text-[#2F4156]"
+                      }
                     >
                       {branchToDelete.name}
                     </span>
