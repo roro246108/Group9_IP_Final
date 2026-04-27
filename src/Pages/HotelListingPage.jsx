@@ -6,25 +6,14 @@ import SearchBar from "../Components/SearchBar";
 import FilterSidebar from "../Components/FilterSidebar";
 import HotelCard from "../Components/HotelCard";
 import Footer from "../Components/Footer";
-import { apiGet, apiPost } from "../services/apiClient";
+import { apiGet } from "../services/apiClient";
 import { getSafeRoomImage, normalizeRoomRecord } from "../utils/roomMedia";
 import { useFavorites } from "../Context/FavoritesContext";
-import { getFallbackRooms } from "../utils/catalogFallbacks";
 import Background1 from "../assets/Images/Background.jpg";
 import Background2 from "../assets/Images/Background2.jpg";
 import Background3 from "../assets/Images/Backgroud3.jpg";
 import Background4 from "../assets/Images/Background4.jpg";
 import Background5 from "../assets/Images/Background 5.jpg";
-
-const DEFAULT_BRANCH_OPTIONS = [
-  "Cairo Branch",
-  "Alexandria Branch",
-  "Marsa Alam Branch",
-  "Sharm El Sheikh Branch",
-  "Ain El Sokhna Branch",
-];
-
-const DEFAULT_ROOM_TYPE_OPTIONS = ["Standard", "Deluxe", "Suite", "Penthouse"];
 
 export default function HotelListingPage() {
   const location = useLocation();
@@ -34,6 +23,7 @@ export default function HotelListingPage() {
   const initialCheckOut = initialState.checkOut || "";
   const initialGuests = initialState.guests || "";
   const initialRoomType = initialState.roomType || "";
+
   const scrollRef = useRef(null);
   const availableRoomsRef = useRef(null);
   const { favoriteCount } = useFavorites();
@@ -43,6 +33,7 @@ export default function HotelListingPage() {
   const [animateText, setAnimateText] = useState(true);
   const [rooms, setRooms] = useState([]);
   const [allRooms, setAllRooms] = useState([]);
+  const [featuredRooms, setFeaturedRooms] = useState([]);
   const [searchPopup, setSearchPopup] = useState({
     open: false,
     title: "",
@@ -60,9 +51,9 @@ export default function HotelListingPage() {
     checkIn: initialCheckIn,
     checkOut: initialCheckOut,
     guests: normalizeGuests(initialGuests) || "",
-    maxPrice: 1000,
+    maxPrice: "",
     roomType: initialRoomType,
-    type: "",
+    type: initialRoomType,
     branch: initialBranch,
     rating: "",
     sortBy: "popularity",
@@ -104,65 +95,95 @@ export default function HotelListingPage() {
     },
   ];
 
-  const fetchAllRooms = async () => {
-    try {
-      const data = await apiGet("/rooms");
-      const normalizedRooms = Array.isArray(data) && data.length > 0
-        ? data.map(normalizeRoomRecord)
-        : getFallbackRooms();
-      setAllRooms(normalizedRooms);
-      return normalizedRooms;
-    } catch (error) {
-      console.error("Failed to fetch rooms:", error.message);
-      const fallbackRooms = getFallbackRooms();
-      setAllRooms(fallbackRooms);
-      return fallbackRooms;
+  const buildRoomQuery = (values = {}) => {
+    const params = new URLSearchParams();
+
+    if (values.destination) params.append("destination", values.destination);
+    if (values.branch) params.append("branch", values.branch);
+    const effectiveType = values.type || values.roomType;
+    if (effectiveType) params.append("type", effectiveType);
+    if (values.checkIn) params.append("checkIn", values.checkIn);
+    if (values.checkOut) params.append("checkOut", values.checkOut);
+    if (values.guests) params.append("guests", values.guests);
+    if (
+      values.maxPrice !== "" &&
+      values.maxPrice !== null &&
+      values.maxPrice !== undefined
+    ) {
+      params.append("maxPrice", values.maxPrice);
     }
+    if (values.rating) params.append("rating", values.rating);
+    if (values.sortBy) params.append("sortBy", values.sortBy);
+
+    return params.toString();
+  };
+
+  const fetchFilteredRooms = async (values = filters) => {
+    const query = buildRoomQuery(values);
+    const data = await apiGet(`/rooms/user-search?${query}`);
+    return Array.isArray(data) ? data.map(normalizeRoomRecord) : [];
+  };
+
+  const fetchAllRooms = async () => {
+    const data = await apiGet("/rooms");
+    const normalizedRooms = Array.isArray(data)
+      ? data.map(normalizeRoomRecord)
+      : [];
+
+    setAllRooms(normalizedRooms);
+    return normalizedRooms;
+  };
+
+  const fetchFeaturedRooms = async () => {
+    const data = await apiGet("/rooms/featured");
+    const normalizedFeaturedRooms = Array.isArray(data)
+      ? data.map(normalizeRoomRecord)
+      : [];
+
+    setFeaturedRooms(normalizedFeaturedRooms);
+    return normalizedFeaturedRooms;
   };
 
   useEffect(() => {
     const loadInitialRooms = async () => {
       try {
         setLoading(true);
-        const databaseRooms = await fetchAllRooms();
 
-        if (
-          initialBranch &&
-          initialCheckIn &&
-          initialCheckOut &&
-          initialGuests
-        ) {
-          try {
-            const data = await apiPost("/bookings/search", {
-              branch: initialBranch,
-              roomType: initialRoomType || "",
-              checkIn: initialCheckIn,
-              checkOut: initialCheckOut,
-              guests: Number(initialGuests),
-            });
-            setRooms((data.rooms || []).map(normalizeRoomRecord));
-          } catch {
-            setRooms(databaseRooms.filter((room) => {
-              const branchMatch = !initialBranch || room.branch === initialBranch;
-              const typeMatch = !initialRoomType || room.type === initialRoomType;
-              const guestsMatch = !initialGuests || room.guests >= Number(initialGuests);
-              return branchMatch && typeMatch && guestsMatch;
-            }));
-          }
-          return;
-        }
+        await Promise.all([fetchAllRooms(), fetchFeaturedRooms()]);
 
-        setRooms(databaseRooms);
+        const initialFilters = {
+          destination: initialBranch,
+          branch: initialBranch,
+          roomType: initialRoomType || "",
+          type: initialRoomType || "",
+          checkIn: initialCheckIn,
+          checkOut: initialCheckOut,
+          guests: normalizeGuests(initialGuests) || "",
+          maxPrice: "",
+          rating: "",
+          sortBy: "popularity",
+        };
+
+        const backendRooms = await fetchFilteredRooms(initialFilters);
+        setRooms(backendRooms);
       } catch (error) {
-        console.error("Failed to load searched rooms:", error.message);
+        console.error("Failed to load rooms:", error.message);
         setRooms([]);
+        setAllRooms([]);
+        setFeaturedRooms([]);
       } finally {
         setLoading(false);
       }
     };
 
     loadInitialRooms();
-  }, [initialBranch, initialCheckIn, initialCheckOut, initialGuests, initialRoomType]);
+  }, [
+    initialBranch,
+    initialCheckIn,
+    initialCheckOut,
+    initialGuests,
+    initialRoomType,
+  ]);
 
   useEffect(() => {
     const sliderInterval = setInterval(() => {
@@ -189,160 +210,114 @@ export default function HotelListingPage() {
   const handleSearchClick = async (values) => {
     const updatedFilters = {
       ...filters,
-      destination: values.branch || "",
+      destination: values.destination || values.branch || "",
       branch: values.branch || "",
       roomType: values.roomType || "",
       type: values.roomType || "",
       checkIn: values.checkIn || "",
       checkOut: values.checkOut || "",
       guests: normalizeGuests(values.guests) || "",
+      maxPrice:
+        values.maxPrice !== undefined ? values.maxPrice : filters.maxPrice,
     };
 
     try {
       setLoading(true);
+      setSearchPopup({
+        open: false,
+        title: "",
+        message: "",
+      });
 
-      try {
-        const data = await apiPost("/bookings/search", {
-          branch: values.branch,
-          roomType: values.roomType || "",
-          checkIn: values.checkIn,
-          checkOut: values.checkOut,
-          guests: Number(values.guests),
-        });
+      const backendRooms = await fetchFilteredRooms(updatedFilters);
 
-        setFilters(updatedFilters);
-        setRooms((data.rooms || []).map(normalizeRoomRecord));
-        scrollToAvailableRooms();
-      } catch {
-        const localResults = (allRooms.length > 0 ? allRooms : getFallbackRooms()).filter((room) => {
-          const branchMatch = !values.branch || room.branch === values.branch;
-          const typeMatch = !values.roomType || room.type === values.roomType;
-          const guestsMatch = !values.guests || room.guests >= Number(values.guests);
-          return branchMatch && typeMatch && guestsMatch && room.available;
-        });
-
-        setFilters(updatedFilters);
-        setRooms(localResults);
-        scrollToAvailableRooms();
-      }
-    } catch (error) {
-      console.error("Search failed:", error.message);
       setFilters(updatedFilters);
-      setRooms((allRooms.length > 0 ? allRooms : getFallbackRooms()).filter((room) => {
-        const branchMatch = !values.branch || room.branch === values.branch;
-        const typeMatch = !values.roomType || room.type === values.roomType;
-        const guestsMatch = !values.guests || room.guests >= Number(values.guests);
-        return branchMatch && typeMatch && guestsMatch && room.available;
-      }));
-      scrollToAvailableRooms();
+      setRooms(backendRooms);
+    } catch (error) {
+      console.error("Backend search failed:", error.message);
+      setRooms([]);
+
+      if (error?.status === 409) {
+        setSearchPopup({
+          open: true,
+          title: "Room Reserved",
+          message:
+            "This room is reserved during the selected period. Please change the check-in or check-out date and try again.",
+        });
+      }
     } finally {
       setLoading(false);
+      scrollToAvailableRooms();
     }
   };
 
-  const resetFilters = () => {
-    setFilters((prev) => ({
+  const resetFilters = async () => {
+    const resetValues = {
       destination: "",
-      checkIn: prev.checkIn,
-      checkOut: prev.checkOut,
-      guests: prev.guests,
-      maxPrice: 1000,
+      checkIn: "",
+      checkOut: "",
+      guests: "",
+      maxPrice: "",
       roomType: "",
       type: "",
       branch: "",
       rating: "",
       sortBy: "popularity",
-    }));
-    if (allRooms.length > 0) {
-      setRooms(allRooms);
-    } else {
+    };
+
+    setFilters(resetValues);
+
+    try {
       setLoading(true);
-      fetchAllRooms()
-        .then((databaseRooms) => setRooms(databaseRooms))
-        .finally(() => setLoading(false));
+      const backendRooms = await fetchFilteredRooms(resetValues);
+      setRooms(backendRooms);
+    } catch (error) {
+      console.error("Reset filters failed:", error.message);
+      setRooms([]);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const filteredRooms = useMemo(() => {
-    let result = [...rooms];
-
-    result = result.filter((room) => room.available);
-
-    if (filters.destination.trim()) {
-      const keyword = filters.destination.toLowerCase();
-
-      result = result.filter(
-        (room) =>
-          room.hotelName?.toLowerCase().includes(keyword) ||
-          room.branch?.toLowerCase().includes(keyword) ||
-          room.city?.toLowerCase().includes(keyword) ||
-          room.location?.toLowerCase().includes(keyword) ||
-          room.roomName?.toLowerCase().includes(keyword) ||
-          room.type?.toLowerCase().includes(keyword)
-      );
-    }
-
-    result = result.filter((room) => room.price <= filters.maxPrice);
-
-    if (filters.type) {
-      result = result.filter((room) => room.type === filters.type);
-    }
-
-    if (filters.branch) {
-      result = result.filter((room) => room.branch === filters.branch);
-    }
-
-    if (filters.rating) {
-      result = result.filter((room) => room.rating >= Number(filters.rating));
-    }
-
-    if (filters.guests) {
-      const guestNumber = parseInt(filters.guests, 10);
-      if (!Number.isNaN(guestNumber)) {
-        result = result.filter((room) => room.guests >= guestNumber);
+  useEffect(() => {
+    const applyBackendFilters = async () => {
+      try {
+        setLoading(true);
+        const backendRooms = await fetchFilteredRooms(filters);
+        setRooms(backendRooms);
+      } catch (error) {
+        console.error("Backend filter failed:", error.message);
+        setRooms([]);
+      } finally {
+        setLoading(false);
       }
-    }
+    };
 
-    if (filters.sortBy === "low-high") {
-      result.sort((a, b) => a.price - b.price);
-    } else if (filters.sortBy === "high-low") {
-      result.sort((a, b) => b.price - a.price);
-    } else if (filters.sortBy === "rating" || filters.sortBy === "popularity") {
-      result.sort((a, b) => b.rating - a.rating);
-    }
+    applyBackendFilters();
+  }, [
+    filters.branch,
+    filters.type,
+    filters.rating,
+    filters.guests,
+    filters.maxPrice,
+    filters.sortBy,
+    filters.checkIn,
+    filters.checkOut,
+  ]);
 
-    return result;
-  }, [rooms, filters]);
-
-  const featuredRooms = useMemo(() => {
-    const databaseFeaturedRooms = allRooms.filter((room) => room.featured);
-    const sourceRooms =
-      databaseFeaturedRooms.length > 0
-        ? databaseFeaturedRooms
-        : [...allRooms].sort((a, b) => b.rating - a.rating);
-
-    return sourceRooms.slice(0, 5);
-  }, [allRooms]);
+  const filteredRooms = useMemo(() => {
+    return rooms;
+  }, [rooms]);
 
   const branchOptions = useMemo(
     () =>
-      [
-        ...new Set([
-          ...DEFAULT_BRANCH_OPTIONS,
-          ...allRooms.map((room) => room.branch).filter(Boolean),
-        ]),
-      ].sort(),
+      [...new Set(allRooms.map((room) => room.branch).filter(Boolean))].sort(),
     [allRooms]
   );
 
   const typeOptions = useMemo(
     () =>
-      [
-        ...new Set([
-          ...DEFAULT_ROOM_TYPE_OPTIONS,
-          ...allRooms.map((room) => room.type).filter(Boolean),
-        ]),
-      ].sort(),
+      [...new Set(allRooms.map((room) => room.type).filter(Boolean))].sort(),
     [allRooms]
   );
 
@@ -368,8 +343,12 @@ export default function HotelListingPage() {
       {searchPopup.open && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/45 px-4">
           <div className="w-full max-w-md rounded-[28px] bg-white p-7 shadow-2xl">
-            <h3 className="text-2xl font-bold text-[#223a5e]">{searchPopup.title}</h3>
-            <p className="mt-3 text-sm leading-7 text-slate-600">{searchPopup.message}</p>
+            <h3 className="text-2xl font-bold text-[#223a5e]">
+              {searchPopup.title}
+            </h3>
+            <p className="mt-3 text-sm leading-7 text-slate-600">
+              {searchPopup.message}
+            </p>
             <div className="mt-6 flex justify-end">
               <button
                 type="button"
@@ -396,7 +375,9 @@ export default function HotelListingPage() {
               <div
                 key={index}
                 className={`absolute inset-0 bg-cover bg-center transition-all duration-1000 ${
-                  index === currentSlide ? "scale-100 opacity-100" : "scale-105 opacity-0"
+                  index === currentSlide
+                    ? "scale-100 opacity-100"
+                    : "scale-105 opacity-0"
                 }`}
                 style={{ backgroundImage: `url(${image})` }}
               />
@@ -409,7 +390,9 @@ export default function HotelListingPage() {
               <div className="max-w-2xl px-6 md:px-10">
                 <div
                   className={`transition-all duration-500 ${
-                    animateText ? "translate-y-0 opacity-100" : "translate-y-6 opacity-0"
+                    animateText
+                      ? "translate-y-0 opacity-100"
+                      : "translate-y-6 opacity-0"
                   }`}
                 >
                   <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm text-white backdrop-blur-md">
@@ -489,24 +472,36 @@ export default function HotelListingPage() {
       <section className="mx-auto max-w-7xl px-4 pt-10 md:px-6 lg:px-8">
         <div className="grid gap-6 md:grid-cols-3">
           <div className="rounded-3xl border border-[#e6eef7] bg-white p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-md">
-            <p className="text-sm font-medium text-[#5b7aa3]">Available Branches</p>
-            <h3 className="mt-2 text-4xl font-bold text-[#223a5e]">{uniqueBranchesCount}</h3>
+            <p className="text-sm font-medium text-[#5b7aa3]">
+              Available Branches
+            </p>
+            <h3 className="mt-2 text-4xl font-bold text-[#223a5e]">
+              {uniqueBranchesCount}
+            </h3>
             <p className="mt-2 text-sm text-slate-500">
               Discover different locations and room styles.
             </p>
           </div>
 
           <div className="rounded-3xl border border-[#e6eef7] bg-white p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-md">
-            <p className="text-sm font-medium text-[#5b7aa3]">Featured Rooms</p>
-            <h3 className="mt-2 text-4xl font-bold text-[#223a5e]">{featuredRooms.length}</h3>
+            <p className="text-sm font-medium text-[#5b7aa3]">
+              Featured Rooms
+            </p>
+            <h3 className="mt-2 text-4xl font-bold text-[#223a5e]">
+              {featuredRooms.length}
+            </h3>
             <p className="mt-2 text-sm text-slate-500">
               Handpicked premium rooms for a better stay.
             </p>
           </div>
 
           <div className="rounded-3xl border border-[#e6eef7] bg-white p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-md">
-            <p className="text-sm font-medium text-[#5b7aa3]">Saved Favorites</p>
-            <h3 className="mt-2 text-4xl font-bold text-[#223a5e]">{favoriteCount}</h3>
+            <p className="text-sm font-medium text-[#5b7aa3]">
+              Saved Favorites
+            </p>
+            <h3 className="mt-2 text-4xl font-bold text-[#223a5e]">
+              {favoriteCount}
+            </h3>
             <p className="mt-2 text-sm text-slate-500">
               Keep your preferred rooms in one place.
             </p>
@@ -520,7 +515,9 @@ export default function HotelListingPage() {
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#2f6fb3]">
               Featured Stays
             </p>
-            <h2 className="mt-2 text-3xl font-bold text-[#223a5e]">Premium Blue Wave Rooms</h2>
+            <h2 className="mt-2 text-3xl font-bold text-[#223a5e]">
+              Premium Blue Wave Rooms
+            </h2>
           </div>
 
           <div className="hidden items-center gap-3 md:flex">
@@ -563,7 +560,9 @@ export default function HotelListingPage() {
                 <p className="text-sm text-[#cfe2ff]">{room.branch}</p>
                 <h3 className="mt-1 text-2xl font-bold">{room.roomName}</h3>
                 <p className="mt-2 text-slate-200">{room.location}</p>
-                <p className="mt-3 text-lg font-semibold">${room.price} / night</p>
+                <p className="mt-3 text-lg font-semibold">
+                  ${room.price} / night
+                </p>
               </div>
             </Link>
           ))}
@@ -576,7 +575,9 @@ export default function HotelListingPage() {
       >
         <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="text-4xl font-bold text-[#223a5e]">Available Rooms</h2>
+            <h2 className="text-4xl font-bold text-[#223a5e]">
+              Available Rooms
+            </h2>
             <p className="mt-2 text-sm text-[#8A99A8]">
               {filteredRooms.length} rooms found across Blue Wave branches
             </p>
@@ -618,8 +619,12 @@ export default function HotelListingPage() {
               </div>
             ) : (
               <div className="rounded-3xl bg-white p-12 text-center shadow-md">
-                <h3 className="text-2xl font-bold text-[#223a5e]">No rooms found</h3>
-                <p className="mt-2 text-slate-500">Try changing your search or filters.</p>
+                <h3 className="text-2xl font-bold text-[#223a5e]">
+                  No rooms found
+                </h3>
+                <p className="mt-2 text-slate-500">
+                  Try changing your search or filters.
+                </p>
               </div>
             )}
           </div>
