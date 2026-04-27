@@ -30,25 +30,6 @@ function mergeOfferIntoRoom(baseRoom = {}, sourceRoom = {}) {
   };
 }
 
-function getAvailabilityMessage(error) {
-  const reason = error?.response?.data?.reason;
-  const message = error?.response?.data?.message;
-
-  const fallbackMessages = {
-    room_not_found: message || "We could not find this room in the database.",
-    room_reserved:
-      message || "This room is already reserved for the selected dates.",
-    room_manually_blocked:
-      message || "This room is blocked in the room calendar for those dates.",
-  };
-
-  if (reason && fallbackMessages[reason]) {
-    return fallbackMessages[reason];
-  }
-
-  return message || "Error checking availability. Please try again.";
-}
-
 export default function RoomBooking() {
   const location = useLocation();
   const roomFromNavigation = location.state?.room || location.state?.selectedRoom;
@@ -59,7 +40,7 @@ export default function RoomBooking() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [roomLoading, setRoomLoading] = useState(false);
-  const [availabilityNotice, setAvailabilityNotice] = useState({
+  const [availabilityModal, setAvailabilityModal] = useState({
     open: false,
     title: "",
     message: "",
@@ -108,16 +89,28 @@ export default function RoomBooking() {
     return <p className="mt-40 text-center text-xl">No room selected</p>;
   }
 
+  const closeAvailabilityModal = () => {
+    setAvailabilityModal({ open: false, title: "", message: "" });
+  };
+
+  const showAvailabilityModal = (title, message) => {
+    setAvailabilityModal({
+      open: true,
+      title,
+      message,
+    });
+  };
+
   const handleCheckAvailability = async () => {
     if (!checkIn || !checkOut) {
-      alert("Please select both dates.");
+      showAvailabilityModal("Missing Dates", "Please select both check-in and check-out dates.");
       return;
     }
 
     const calculatedNights = calculateNights(checkIn, checkOut);
 
     if (calculatedNights <= 0) {
-      alert("Check-out must be after check-in.");
+      showAvailabilityModal("Invalid Dates", "Check-out must be after check-in.");
       return;
     }
 
@@ -136,18 +129,21 @@ export default function RoomBooking() {
         const calculatedTotal = calculateTotal(calculatedNights, room.price);
         setNights(calculatedNights);
         setTotal(calculatedTotal);
-        setAvailabilityNotice({
-          open: true,
-          title: "Room Available",
-          message: `This room is available for ${calculatedNights} nights.`,
-        });
+        showAvailabilityModal(
+          "Room Available",
+          `This room is available for ${calculatedNights} nights.`
+        );
       }
     } catch (error) {
-      setAvailabilityNotice({
-        open: true,
-        title: "Room Unavailable",
-        message: getAvailabilityMessage(error),
-      });
+      const status = error.response?.status;
+      const backendMessage =
+        error.response?.data?.message ||
+        "Error checking availability. Please try again.";
+
+      showAvailabilityModal(
+        status === 409 || status === 404 ? "Room Unavailable" : "Availability Check Failed",
+        backendMessage
+      );
     } finally {
       setLoading(false);
     }
@@ -217,34 +213,37 @@ export default function RoomBooking() {
         </div>
       </div>
 
-      {availabilityNotice.open && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 px-4">
+      {availabilityModal.open && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 px-4 backdrop-blur-[2px]">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-xl font-semibold text-[#1e3a8a]">
-                {availabilityNotice.title}
-              </h3>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#6b7280]">
+                  Booking Check
+                </p>
+                <h3 className="mt-1 text-2xl font-bold text-[#1e3a8a]">
+                  {availabilityModal.title}
+                </h3>
+              </div>
               <button
                 type="button"
-                onClick={() =>
-                  setAvailabilityNotice({ open: false, title: "", message: "" })
-                }
+                onClick={closeAvailabilityModal}
                 className="rounded-full px-2 py-1 text-2xl leading-none text-gray-400 hover:text-gray-700"
-                aria-label="Close availability message"
+                aria-label="Close popup"
               >
                 &times;
               </button>
             </div>
-            <p className="text-sm leading-6 text-gray-700">
-              {availabilityNotice.message}
-            </p>
+
+            <div className="mt-5 rounded-2xl bg-[#f8fbff] p-4 text-sm leading-6 text-gray-700">
+              {availabilityModal.message}
+            </div>
+
             <div className="mt-6 flex justify-end">
               <button
                 type="button"
-                onClick={() =>
-                  setAvailabilityNotice({ open: false, title: "", message: "" })
-                }
-                className="rounded-xl bg-[#1e3a8a] px-5 py-2.5 text-sm font-semibold text-white"
+                onClick={closeAvailabilityModal}
+                className="rounded-xl bg-[#1e3a8a] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#17306e]"
               >
                 OK
               </button>

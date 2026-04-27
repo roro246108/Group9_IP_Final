@@ -15,6 +15,7 @@ import BackupTab from "../Components/admin/settings/BackupTab";
 import { logAuditEvent } from "../services/auditLogger";
 import useAdminThemeMode from "../hooks/useAdminThemeMode";
 import { userPreferencesApi } from "../services/userPreferencesApi";
+import { getMyProfile } from "../services/ProfileApi";
 import { buildScopedStorageKey, getCurrentAdminIdentity } from "../utils/currentAdminIdentity";
 import { useLanguage } from "../Context/LanguageContext";
 
@@ -113,6 +114,34 @@ export default function AdminSettings() {
       isMounted = false;
     };
   }, [generalStorageKey, notificationsStorageKey, userId]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const hydrateProfileContact = async () => {
+      try {
+        const data = await getMyProfile();
+        const profileUser = data?.user || {};
+
+        if (!isMounted) return;
+
+        setGeneralSettings((prev) => ({
+          ...prev,
+          email: profileUser.email || prev.email,
+          phone: profileUser.phone || prev.phone,
+          address: profileUser.address || prev.address,
+        }));
+      } catch {
+        // If the profile API is unavailable, keep the existing values.
+      }
+    };
+
+    hydrateProfileContact();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [userId]);
 
   const handleSaveAppearance = async () => {
     setIsSaving(true);

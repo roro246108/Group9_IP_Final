@@ -110,36 +110,40 @@ export function OffersProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [offersData, roomsData] = await Promise.all([
+        offersService.fetchOffers().catch(() => []),
+        apiGet("/rooms").catch(() => []),
+      ]);
+
+      const normalizedOffers = Array.isArray(offersData) && offersData.length > 0
+        ? offersData
+        : getFallbackOffers();
+      const normalizedRooms = Array.isArray(roomsData) && roomsData.length > 0
+        ? roomsData.map(normalizeRoomRecord)
+        : getFallbackRooms();
+
+      setOffers(normalizedOffers);
+      setRooms(normalizedRooms);
+      setError(null);
+    } catch {
+      setOffers(getFallbackOffers());
+      setRooms(getFallbackRooms());
+      setError(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        const [offersData, roomsData] = await Promise.all([
-          offersService.fetchOffers().catch(() => []),
-          apiGet("/rooms").catch(() => []),
-        ]);
-
-        const normalizedOffers = Array.isArray(offersData) && offersData.length > 0
-          ? offersData
-          : getFallbackOffers();
-        const normalizedRooms = Array.isArray(roomsData) && roomsData.length > 0
-          ? roomsData.map(normalizeRoomRecord)
-          : getFallbackRooms();
-
-        setOffers(normalizedOffers);
-        setRooms(normalizedRooms);
-        setError(null);
-      } catch {
-        setOffers(getFallbackOffers());
-        setRooms(getFallbackRooms());
-        setError(null);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     loadData();
   }, []);
+
+  const refreshOffers = async () => {
+    await loadData();
+  };
 
   const addOffer = async (newOffer) => {
     try {
@@ -153,29 +157,31 @@ export function OffersProvider({ children }) {
         originalPrice,
         pricePerNight,
       });
-      setOffers((prev) => [...prev, created]);
+      await refreshOffers();
+      return created;
     } catch (err) {
       console.error("Failed to create offer:", err.message);
+      throw err;
     }
   };
 
   const deleteOffer = async (id) => {
     try {
       await offersService.deleteOffer(id);
-      setOffers((prev) => prev.filter((offer) => String(offer._id) !== String(id)));
+      await refreshOffers();
     } catch (err) {
       console.error("Failed to delete offer:", err.message);
+      throw err;
     }
   };
 
   const toggleOffer = async (id) => {
     try {
-      const updated = await offersService.toggleOffer(id);
-      setOffers((prev) =>
-        prev.map((offer) => (String(offer._id) === String(id) ? updated : offer))
-      );
+      await offersService.toggleOffer(id);
+      await refreshOffers();
     } catch (err) {
       console.error("Failed to toggle offer:", err.message);
+      throw err;
     }
   };
 

@@ -17,6 +17,8 @@ function OfferFormModal({ onClose, onSubmit }) {
   const [isActive, setIsActive] = useState(false);
   const [errors, setErrors] = useState({});
   const [rooms, setRooms] = useState([]);
+  const [submitError, setSubmitError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -71,7 +73,7 @@ function OfferFormModal({ onClose, onSubmit }) {
     return newErrors;
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const newErrors = validate();
     if (Object.keys(newErrors).length > 0) {
@@ -79,12 +81,21 @@ function OfferFormModal({ onClose, onSubmit }) {
       return;
     }
 
-    onSubmit({
-      ...formData,
-      active: true,
-      pricePerNight: Math.round(formData.originalPrice * (1 - formData.discount / 100)),
-    });
-    onClose();
+    try {
+      setIsSubmitting(true);
+      setSubmitError("");
+
+      await onSubmit({
+        ...formData,
+        active: true,
+        pricePerNight: Math.round(formData.originalPrice * (1 - formData.discount / 100)),
+      });
+      onClose();
+    } catch (error) {
+      setSubmitError(error.message || "Failed to create offer.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -282,12 +293,16 @@ function OfferFormModal({ onClose, onSubmit }) {
 
             <button
               type="submit"
-              disabled={!isFormValid}
+              disabled={!isFormValid || isSubmitting}
               className="rounded-lg bg-[#1565a8] px-8 py-2.5 text-sm font-bold text-white shadow-md shadow-blue-200 transition-colors hover:bg-[#1e40af] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Add Offer
+              {isSubmitting ? "Adding..." : "Add Offer"}
             </button>
           </div>
+
+          {submitError && (
+            <p className="mt-3 text-sm font-medium text-red-500">{submitError}</p>
+          )}
         </form>
       </div>
     </div>

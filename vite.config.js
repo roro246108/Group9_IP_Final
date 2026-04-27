@@ -18,6 +18,8 @@ export default defineConfig({
       react: path.resolve(__dirname, 'node_modules/react'),
       'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
       'react-router-dom': path.resolve(__dirname, 'node_modules/react-router-dom'),
+      'framer-motion': path.resolve(__dirname, 'node_modules/framer-motion/dist/cjs/index.js'),
+      '@reduxjs/toolkit': path.resolve(__dirname, 'node_modules/@reduxjs/toolkit/dist/cjs/index.js'),
     },
   },
 });

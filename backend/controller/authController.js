@@ -81,7 +81,7 @@ export const register = async (req, res) => {
         email,
         phone,
         password: hashedPassword,
-        role: email.toLowerCase() === "admin@hotel.com" ? "admin" : "user",
+        role: "user",
          ipAddress: req.ip,
       });
 
