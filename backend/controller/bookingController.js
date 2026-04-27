@@ -384,11 +384,11 @@ export const searchAvailability = async (req, res) => {
       });
     }
 
-    // Build query to find available rooms by branch, optional room type, and guest capacity.
+    // For future-date searches, rely on booking overlap and manual date blocks.
+    // "Occupied" is a current state and should not hide a room that is free on the selected dates.
     const roomQuery = {
-      available: { $ne: false },
-      status: { $nin: ["Occupied", "occupied", "Maintenance", "maintenance"] },
       guests: { $gte: guestNumber },
+      status: { $nin: ["Maintenance", "maintenance"] },
     };
 
     if (roomId && mongoose.Types.ObjectId.isValid(roomId)) {

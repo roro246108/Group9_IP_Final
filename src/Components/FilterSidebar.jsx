@@ -22,10 +22,7 @@ export default function FilterSidebar({
             className="w-full rounded-2xl border border-[#dbe4f0] bg-[#CBD9E6] px-4 py-4 text-[#223a5e] outline-none"
           >
             <option value="">All Types</option>
-            {(typeOptions.length > 0
-              ? typeOptions
-              : ["Standard", "Deluxe", "Suite", "Penthouse"]
-            ).map((type) => (
+            {typeOptions.map((type) => (
               <option key={type} value={type}>
                 {type}
               </option>
@@ -43,16 +40,7 @@ export default function FilterSidebar({
             className="w-full rounded-2xl border border-[#dbe4f0] bg-[#CBD9E6] px-4 py-4 text-[#223a5e] outline-none"
           >
             <option value="">All Branches</option>
-            {(branchOptions.length > 0
-              ? branchOptions
-              : [
-                  "Alexandria Branch",
-                  "Marsa Alam Branch",
-                  "Cairo Branch",
-                  "Sharm El Sheikh Branch",
-                  "Ain El Sokhna Branch",
-                ]
-            ).map((branch) => (
+            {branchOptions.map((branch) => (
               <option key={branch} value={branch}>
                 {branch}
               </option>

@@ -84,7 +84,7 @@ export default function SearchBar({
   today.setHours(0, 0, 0, 0);
 
   const validationSchema = Yup.object({
-    branch: Yup.string().required("Branch is required"),
+    branch: Yup.string(),
     roomType: Yup.string(),
     checkIn: Yup.date()
       .required("Check-in date is required")
@@ -107,7 +107,7 @@ export default function SearchBar({
   const formik = useFormik({
     enableReinitialize: true,
     initialValues: {
-      branch: filters.branch || "Cairo Branch",
+      branch: filters.branch || "",
       roomType: filters.roomType || "",
       checkIn: filters.checkIn || "",
       checkOut: filters.checkOut || "",
@@ -127,39 +127,22 @@ export default function SearchBar({
         checkIn: values.checkIn,
         checkOut: values.checkOut,
         guests: guestsNumber,
-        maxPrice: filters.maxPrice || 1000,
+        maxPrice: filters.maxPrice,
       });
     },
   });
 
   const branchSelectOptions =
-    branchOptions.length > 0
-      ? [
-          { value: "", label: "Select branch" },
-          ...branchOptions.map((branch) => ({ value: branch, label: branch })),
-        ]
-      : [
-          { value: "", label: "Select branch" },
-          { value: "Cairo Branch", label: "Cairo Branch" },
-          { value: "Alexandria Branch", label: "Alexandria Branch" },
-          { value: "Marsa Alam Branch", label: "Marsa Alam Branch" },
-          { value: "Sharm El Sheikh Branch", label: "Sharm El Sheikh Branch" },
-          { value: "Ain El Sokhna Branch", label: "Ain El Sokhna Branch" },
-        ];
+    [
+      { value: "", label: "Select branch" },
+      ...branchOptions.map((branch) => ({ value: branch, label: branch })),
+    ];
 
   const roomTypeSelectOptions =
-    roomTypeOptions.length > 0
-      ? [
-          { value: "", label: "Any Room Type" },
-          ...roomTypeOptions.map((type) => ({ value: type, label: type })),
-        ]
-      : [
-          { value: "", label: "Any Room Type" },
-          { value: "Standard", label: "Standard" },
-          { value: "Deluxe", label: "Deluxe" },
-          { value: "Suite", label: "Suite" },
-          { value: "Penthouse", label: "Penthouse" },
-        ];
+    [
+      { value: "", label: "Any Room Type" },
+      ...roomTypeOptions.map((type) => ({ value: type, label: type })),
+    ];
 
   const guestSelectOptions = [
     { value: "", label: "Select guests" },

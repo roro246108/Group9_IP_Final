@@ -7,6 +7,7 @@ import {
   deleteRoom,
   getFeaturedRooms,
   filterRooms,
+   userSearchRooms,
 } from "../controller/roomController.js";
 import { protect } from "../MiddleWares/auth.js";
 
@@ -14,6 +15,7 @@ const router = express.Router();
 
 router.get("/featured", getFeaturedRooms);
 router.get("/filter", filterRooms);
+router.get("/user-search", userSearchRooms);
 router.get("/", getRooms);
 router.get("/:id", getRoomById);
 
